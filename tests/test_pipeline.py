@@ -496,3 +496,60 @@ def test_approval_flow_generates_final_docx(tmp_path):
     assert "output_path" in result
     mock_render.assert_called_once()
     mock_status.assert_called_with(mock_db, 1, "complete")
+
+
+# ─── CAMBIO 8: Two new tests ──────────────────────────────────────────────────
+
+
+def test_calculate_dpi_score_atelier_maria():
+    """calculate_dpi_score debe devolver puntuaciones correctas para Atelier Maria."""
+    from agents.orchestrator import calculate_dpi_score
+
+    selections = {
+        "situacion_empresa": "Más de 2 años",
+        "num_empleados": "Más de 2",
+        "facturacion": "Menos de 200.000 €",
+        "evolucion_facturacion": "En crecimiento",
+        "experiencia_internacional": "Ninguna",
+        "alcance_actividad": "Nacional",
+        "num_paises": "Ninguno",
+        "involuccion_gerencia": "Directamente involucrados",
+        "adaptacion_demanda": "Media",
+        "adaptacion_producto": "Alta",
+        "tiene_web": "Sí",
+        "ecommerce": "Sin tienda web propia",
+        "mercados_electronicos": "Con presencia pero sin ventas",
+        "redes_sociales": "Redes sociales activas y planificadas",
+    }
+    score = calculate_dpi_score(selections)
+
+    # Económico: 5 (Más de 2 años) + 5 (Más de 2) + 1 (Menos de 200.000 €) = 11
+    assert score["scores"]["Económico"] == 11
+    # Internacional: 0 (Ninguna) + 3 (Nacional) + 6 (En crecimiento) + 5 (Directamente) + 2 (Media) + 2 (Alta) + 0 (Ninguno) = 18
+    assert score["scores"]["Internacional"] == 18
+    # Digitalización: 3 (Sí) + 1 (Sin tienda) + 1 (Con presencia sin ventas) + 1 (Activas y planificadas) = 6
+    assert score["scores"]["Digitalización"] == 6
+    assert score["total"] == 35
+    assert score["max_total"] == 65
+    assert score["pct"] == 54  # round(35/65*100) = round(53.8) = 54
+
+
+def test_two_document_flow():
+    """get_document_waiting_transcript devuelve el doc en waiting_transcript del sender."""
+    mock_doc = MagicMock()
+    mock_doc.id = 42
+    mock_doc.status = "waiting_transcript"
+    mock_doc.transcript_text = None
+
+    mock_db = MagicMock()
+
+    with patch(
+        "database.crud.get_document_by_sender_and_status", return_value=mock_doc
+    ):
+        from database.crud import get_document_waiting_transcript
+
+        result = get_document_waiting_transcript(mock_db, sender_id="34600000000")
+
+    assert result is mock_doc
+    assert result.id == 42
+    assert result.status == "waiting_transcript"

@@ -36,7 +36,8 @@ class Document(Base):
         String(30),
         nullable=False,
         default="pending",
-    )  # pending | processing | complete | error | waiting_fields
+    )  # pending | processing | complete | error | waiting_fields | waiting_transcript
+    transcript_text = Column(Text, nullable=True)  # CAMBIO 1: second document text
 
     extracted_fields = relationship(
         "ExtractedField", back_populates="document", cascade="all, delete-orphan"

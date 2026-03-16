@@ -37,6 +37,137 @@ CRITERION_QUESTIONS: dict[str, str] = {
 
 QUESTION_BATCH_SIZE = 7  # Max criteria per WhatsApp message
 
+# ─── DPI Scoring (CAMBIO 6) ───────────────────────────────────────────────────
+
+DPI_SCORE_MAP: dict[str, dict[str, int]] = {
+    # BLOQUE ECONÓMICO (15 pts)
+    "situacion_empresa": {
+        "No constituida": 0,
+        "Menos de 2 años": 2,
+        "Más de 2 años": 5,
+    },
+    "num_empleados": {"Menos de 2": 1, "Más de 2": 5},
+    "facturacion": {
+        "Menos de 200.000 €": 1,
+        "Entre 200.000 y 500.000 €": 2,
+        "Entre 500.000 y 1.000.000 €": 4,
+        "Más de 1.000.000 €": 5,
+    },
+    # BLOQUE INTERNACIONAL (35 pts)
+    "experiencia_internacional": {
+        "Ninguna": 0,
+        "Menos de 3 años": 4,
+        "Más de 5 años": 10,
+    },
+    "alcance_actividad": {"Insular": 1, "Nacional": 3, "Internacional": 6},
+    "evolucion_facturacion": {"En decrecimiento": 0, "Estable": 3, "En crecimiento": 6},
+    "involuccion_gerencia": {
+        "Sin participación": 0,
+        "Escasamente involucrados": 1,
+        "Medianamente involucrados": 3,
+        "Directamente involucrados": 5,
+    },
+    "adaptacion_demanda": {"Baja": 0, "Media": 2, "Alta": 4},
+    "adaptacion_producto": {"Baja": 0, "Media": 1, "Alta": 2},
+    "num_paises": {"Ninguno": 0, "De 1 a 5": 1, "Más de 5": 2},
+    # BLOQUE DIGITALIZACIÓN (15 pts)
+    "tiene_web": {"No": 0, "Sí": 3},
+    "ecommerce": {
+        "Sin tienda web propia": 1,
+        "Tienda web propia con ventas bajas": 2,
+        "Tienda web propia con ventas regulares a nivel nacional": 4,
+        "Tienda web propia con ventas regulares a nivel internacional": 6,
+    },
+    "mercados_electronicos": {
+        "Sin presencia en mercados electrónicos": 0,
+        "Con presencia pero sin ventas": 1,
+        "Con ventas nacionales": 2,
+        "Con ventas internacionales": 4,
+    },
+    "redes_sociales": {
+        "Redes sociales inactivas o inexistentes": 0,
+        "Redes sociales activas y planificadas": 1,
+        "Redes sociales que generan ventas": 2,
+    },
+}
+
+BLOQUES: dict[str, list[str]] = {
+    "Económico": ["situacion_empresa", "num_empleados", "facturacion"],
+    "Internacional": [
+        "experiencia_internacional",
+        "alcance_actividad",
+        "evolucion_facturacion",
+        "involuccion_gerencia",
+        "adaptacion_demanda",
+        "adaptacion_producto",
+        "num_paises",
+    ],
+    "Digitalización": [
+        "tiene_web",
+        "ecommerce",
+        "mercados_electronicos",
+        "redes_sociales",
+    ],
+}
+
+BLOQUES_MAX: dict[str, int] = {
+    "Económico": 15,
+    "Internacional": 35,
+    "Digitalización": 15,
+}
+
+
+def calculate_dpi_score(selections: dict) -> dict:
+    """Calcula puntuación DPI por bloque y total. Devuelve scores y porcentajes."""
+    scores: dict[str, int] = {}
+    for bloque, criteria in BLOQUES.items():
+        pts = 0
+        for criterion in criteria:
+            val = selections.get(criterion)
+            if val:
+                pts += DPI_SCORE_MAP.get(criterion, {}).get(val, 0)
+        scores[bloque] = pts
+    total = sum(scores.values())
+    return {
+        "scores": scores,
+        "totals": BLOQUES_MAX,
+        "total": total,
+        "max_total": 65,
+        "pct": round(total / 65 * 100),
+    }
+
+
+def generate_recommendations(selections: dict, score: dict) -> list[str]:
+    """Devuelve lista de recomendaciones para criterios con puntuación baja."""
+    _RECOS: dict[str, dict[str, str]] = {
+        "experiencia_internacional": {
+            "Ninguna": "Sin exportaciones previas — priorizar mercados cercanos (Portugal, Francia)",
+            "Menos de 3 años": "Exportaciones incipientes — consolidar un mercado piloto antes de diversificar",
+        },
+        "ecommerce": {
+            "Sin tienda web propia": "Sin tienda online — considerar Shopify o WooCommerce",
+            "Tienda web propia con ventas bajas": "Tienda con ventas bajas — optimizar SEO y experiencia de usuario",
+        },
+        "mercados_electronicos": {
+            "Sin presencia en mercados electrónicos": "Sin presencia en marketplaces — explorar Etsy, Amazon Handmade",
+            "Con presencia pero sin ventas": "Presencia sin ventas — optimizar listings y política de precios",
+        },
+        "redes_sociales": {
+            "Redes sociales inactivas o inexistentes": "Sin actividad social — crear perfil Instagram mínimo viable",
+        },
+        "involuccion_gerencia": {
+            "Sin participación": "Gerencia sin implicación internacional — asignar responsable de exportación",
+            "Escasamente involucrados": "Implicación baja de gerencia — establecer objetivos internacionales concretos",
+        },
+    }
+    recos: list[str] = []
+    for criterion, criterion_recos in _RECOS.items():
+        val = selections.get(criterion)
+        if val and val in criterion_recos:
+            recos.append(criterion_recos[val])
+    return recos
+
+
 DRAFT_PROMPT = """Eres un experto en internacionalización empresarial. Basándote en el perfil DPI de la empresa, genera el análisis para el informe.
 
 PERFIL DE LA EMPRESA:
@@ -136,8 +267,12 @@ async def process_document(
     db: Session,
     document_id: int,
     file_path: Path,
+    transcript_text: str = "",
 ) -> dict:
     """FASE 1: Read document → extract DPI fields → save to DB → trigger FASE 2.
+
+    Args:
+        transcript_text: Optional pre-extracted transcript (CAMBIO 2).
 
     Returns:
         dict with status, null_selections, question_message
@@ -154,7 +289,7 @@ async def process_document(
                 "reason": "No se pudo extraer texto del documento.",
             }
 
-        extracted = extract_dpi_fields(text)
+        extracted = extract_dpi_fields(text, transcript_text)  # CAMBIO 2
 
         # Persist direct fields
         for key, value in extracted.get("direct_fields", {}).items():
@@ -397,25 +532,26 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
     crud.update_document_status(db, document_id, "waiting_approval")
     _log_to_jarvis(True, document_id, "fase3_draft_ready")
 
+    # CAMBIO 5: compact score summary instead of verbose DAFO preview
     empresa = direct.get("Razon_Social", "Empresa")
-    sep = "─" * 30
+    score = calculate_dpi_score(selections)
+    recos = generate_recommendations(selections, score)
+
+    s = score["scores"]
+    t = score["totals"]
+    recos_text = (
+        "\n".join(f"• {r}" for r in recos)
+        if recos
+        else "• Sin áreas críticas detectadas"
+    )
     draft_preview = (
-        f"📋 *BORRADOR DEL INFORME DPI*\n"
-        f"🏢 *{empresa}*\n"
-        f"{sep}\n\n"
-        f"💪 *FORTALEZAS*\n{draft.get('dafo_fortalezas', '')}\n\n"
-        f"⚠️ *DEBILIDADES*\n{draft.get('dafo_debilidades', '')}\n\n"
-        f"🚀 *OPORTUNIDADES*\n{draft.get('dafo_oportunidades', '')}\n\n"
-        f"🔴 *AMENAZAS*\n{draft.get('dafo_amenazas', '')}\n\n"
-        f"{sep}\n"
-        f"📝 *DEFINICIÓN DEL POTENCIAL*\n{draft.get('definicion_potencial', '')}\n\n"
-        f"{sep}\n"
-        f"📌 *CONCLUSIONES*\n{draft.get('conclusiones', '')}\n\n"
-        f"{sep}\n"
-        f"✅ ¿Apruebas este borrador?\n\n"
-        f"• Responde *APRUEBO* para generar el informe final\n"
-        f"• O indica qué sección cambiar:\n"
-        f"  _Ej: 'Cambia las fortalezas: añade...'_"
+        f"📊 *Diagnóstico DPI — {empresa}*\n\n"
+        f"🏆 *Puntuación: {score['total']}/{score['max_total']} pts* ({score['pct']}%)\n\n"
+        f"📦 Económico: {s['Económico']}/{t['Económico']} | "
+        f"🌍 Internacional: {s['Internacional']}/{t['Internacional']} | "
+        f"💻 Digitalización: {s['Digitalización']}/{t['Digitalización']}\n\n"
+        f"⚠️ *Áreas de mejora:*\n{recos_text}\n\n"
+        f"¿Generamos el informe? Responde *APRUEBO*"
     )
     return {"status": "waiting_approval", "draft_message": draft_preview}
 

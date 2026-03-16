@@ -74,8 +74,8 @@ async def _run_pipeline(db: Session, document_id: int, file_path: Path) -> None:
 async def _bg_process_wa_document(
     db: Session, document_id: int, media_id: str, dest_path: Path, sender: str
 ) -> None:
-    """Background: download WhatsApp media, run pipeline, reply to sender."""
-    from channels.whatsapp import download_media, send_document as wa_send_document
+    """Background: download first doc (cuestionario), store path, ask for consultor data."""
+    from channels.whatsapp import download_media
     from channels.whatsapp import send_text
 
     ok = await download_media(media_id, str(dest_path))
@@ -86,16 +86,62 @@ async def _bg_process_wa_document(
         )
         return
 
+    # CAMBIO 1: store cuestionario path, move to waiting_transcript
+    crud.upsert_field(
+        db, document_id, "_file_path", str(dest_path), confidence=1.0, source="system"
+    )
+    crud.update_document_status(db, document_id, "waiting_transcript")
+
     await send_text(
         sender,
-        "📄 *Documento recibido correctamente*\n\n"
-        "⏳ Estoy analizando el documento con IA...\n"
+        "📄 *Cuestionario recibido.*\n\n"
+        "Para continuar, dime:\n"
+        "*¿Cuál es el nombre del consultor y la fecha de la reunión?*\n\n"
+        "_Ej: María González, 15/03/2025_",
+    )
+
+
+async def _bg_process_wa_transcript(
+    db: Session, document_id: int, media_id: str, dest_path: Path, sender: str
+) -> None:
+    """Background: download transcript PDF, run full pipeline with both docs."""
+    from agents.extractor import read_document_text
+    from channels.whatsapp import download_media
+    from channels.whatsapp import send_text
+
+    ok = await download_media(media_id, str(dest_path))
+    if not ok:
+        await send_text(
+            sender, "No pude descargar la transcripción. Inténtalo de nuevo."
+        )
+        return
+
+    transcript_text = read_document_text(dest_path)
+
+    # Save transcript to document record
+    crud.save_transcript_text(db, document_id, transcript_text)
+    crud.update_document_status(db, document_id, "processing")
+
+    # Retrieve stored cuestionario path
+    fields = crud.get_fields(db, document_id)
+    cuestionario_path_str = next(
+        (f.field_value for f in fields if f.field_name == "_file_path"), None
+    )
+    if not cuestionario_path_str:
+        await send_text(sender, "Error interno: no encontré el cuestionario original.")
+        return
+
+    await send_text(
+        sender,
+        "⏳ *Procesando ambos documentos con IA...*\n"
         "El proceso tarda aproximadamente *2-3 minutos*.\n\n"
         "Te avisaré cuando esté listo. 🔄",
     )
     await asyncio.sleep(2)
 
-    result = await process_document(db, document_id, dest_path)
+    result = await process_document(
+        db, document_id, Path(cuestionario_path_str), transcript_text=transcript_text
+    )
     status = result.get("status")
 
     if status == "waiting_user_response":
@@ -103,7 +149,7 @@ async def _bg_process_wa_document(
     elif status == "waiting_approval":
         await send_text(sender, result["draft_message"])
     elif status == "error":
-        await send_text(sender, "Error procesando el documento. Inténtalo de nuevo.")
+        await send_text(sender, "Error procesando los documentos. Inténtalo de nuevo.")
 
 
 async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
@@ -112,6 +158,27 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
     from channels.whatsapp import send_text
 
     text_lower = text.lower().strip()
+
+    # CAMBIO 4: nombre consultor + fecha reunión (doc waiting for transcript)
+    waiting_doc = crud.get_document_waiting_transcript(db, sender)
+    if waiting_doc:
+        fields = crud.get_fields(db, waiting_doc.id)
+        has_consultor = any(f.field_name == "nombre_consultor" for f in fields)
+        if not has_consultor:
+            crud.upsert_field(
+                db,
+                waiting_doc.id,
+                "nombre_consultor",
+                text,
+                confidence=1.0,
+                source="manual",
+            )
+            await send_text(
+                sender,
+                "✅ *Datos guardados.*\n\n"
+                "Ahora envíame la *transcripción de la entrevista* en PDF.",
+            )
+            return
 
     # Approval keywords → FASE 4
     if any(kw in text_lower for kw in ("apruebo", "aprobado", "aprobar")):
@@ -216,10 +283,23 @@ async def webhook_whatsapp(
             filename = f"{Path(filename).stem}{ext}"
 
         dest_path = UPLOAD_DIR / f"{int(time.time())}_{filename}"
-        doc = crud.create_document(db, "whatsapp", sender, filename)
-        background_tasks.add_task(
-            _bg_process_wa_document, db, doc.id, media_id, dest_path, sender
-        )
+
+        # CAMBIO 1: check if sender is already waiting for a transcript
+        waiting_doc = crud.get_document_waiting_transcript(db, sender)
+        if waiting_doc:
+            background_tasks.add_task(
+                _bg_process_wa_transcript,
+                db,
+                waiting_doc.id,
+                media_id,
+                dest_path,
+                sender,
+            )
+        else:
+            doc = crud.create_document(db, "whatsapp", sender, filename)
+            background_tasks.add_task(
+                _bg_process_wa_document, db, doc.id, media_id, dest_path, sender
+            )
 
     elif msg_type == "text":
         text = msg.get("text", {}).get("body", "")

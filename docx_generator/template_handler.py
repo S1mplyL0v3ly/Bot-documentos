@@ -246,6 +246,10 @@ def render_template(
     direct_fields: dict[str, str] = {k: (v or "") for k, v in raw_direct.items()}
     if not any(k.lower() == "fecha" for k in raw_direct):
         direct_fields["fecha"] = datetime.now().strftime("%d/%m/%Y")
+    # CAMBIO 3: CIF/Cargo/WEB are optional — ensure they map to "" so {{placeholders}} clear
+    for optional_key in ("CIF", "Cargo", "WEB"):
+        if optional_key not in direct_fields:
+            direct_fields[optional_key] = ""
 
     selections: dict[str, str | None] = data.get("selections", {})
     free_texts: dict[str, str] = {

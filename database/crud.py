@@ -34,6 +34,24 @@ def get_document(db: Session, document_id: int) -> Optional[Document]:
     return db.get(Document, document_id)
 
 
+def get_document_waiting_transcript(db: Session, sender_id: str) -> Optional[Document]:
+    """Return a document in waiting_transcript status for the given sender."""
+    return get_document_by_sender_and_status(db, sender_id, "waiting_transcript")
+
+
+def save_transcript_text(
+    db: Session, document_id: int, transcript_text: str
+) -> Optional[Document]:
+    """Persist transcript text into the document record."""
+    doc = db.get(Document, document_id)
+    if doc is None:
+        return None
+    doc.transcript_text = transcript_text
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
 def get_document_by_sender_and_status(
     db: Session, sender_id: str, status: str
 ) -> Optional[Document]:

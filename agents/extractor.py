@@ -417,17 +417,21 @@ def _normalize_selections(data: dict, text: str) -> dict:
     return data
 
 
-def extract_dpi_fields(text: str) -> dict:
+def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dict:
     """Extract DPI fields and selections from document text using Claude.
 
     Args:
-        text: Raw text from the document (up to 6000 chars).
+        cuestionario_text: Raw text from the cuestionario PDF (up to 5000 chars).
+        transcript_text: Optional transcript text from interview PDF (up to 3000 chars).
 
     Returns:
         dict with keys: direct_fields, selections, confidence
         Selections with confidence < 0.7 are set to null.
     """
-    prompt = EXTRACTOR_PROMPT.format(text=text[:6000])
+    combined = f"=== CUESTIONARIO ===\n{cuestionario_text[:5000]}"
+    if transcript_text:
+        combined += f"\n\n=== TRANSCRIPCIÓN ENTREVISTA ===\n{transcript_text[:3000]}"
+    prompt = EXTRACTOR_PROMPT.format(text=combined)
     raw = run_claude(prompt)
     data = _parse_json_response(raw)
 
@@ -438,5 +442,5 @@ def extract_dpi_fields(text: str) -> dict:
             "confidence": {k: 0.0 for k in CRITERION_OPTIONS},
         }
 
-    data = _normalize_selections(data, text)
+    data = _normalize_selections(data, combined)
     return _null_low_confidence(data)
