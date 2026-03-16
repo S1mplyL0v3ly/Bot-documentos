@@ -32,11 +32,49 @@ EXPERIENCIA_MAP: dict[str, str] = {
     "no hemos exportado nunca": "Ninguna",
     "ninguna experiencia": "Ninguna",
     "nunca hemos exportado": "Ninguna",
+    "sin experiencia": "Ninguna",
+    "no exportamos": "Ninguna",
     "hemos exportado de forma puntual": "Menos de 3 años",
+    "exportaciones puntuales": "Menos de 3 años",
+    "ventas puntuales": "Menos de 3 años",
+    "de forma esporádica": "Menos de 3 años",
     "exportamos de manera regular": "Más de 5 años",
     "contamos con un departamento": "Más de 5 años",
     "menos de 3 años": "Menos de 3 años",
     "más de 5 años": "Más de 5 años",
+}
+
+# MEJORA 7: Map free-form involucción gerencia text → exact DPI option
+INVOLUCCION_MAP: dict[str, str] = {
+    "directamente involucrad": "Directamente involucrados",
+    "directamente implicad": "Directamente involucrados",
+    "totalmente involucrad": "Directamente involucrados",
+    "medianamente involucrad": "Medianamente involucrados",
+    "medianamente implicad": "Medianamente involucrados",
+    "escasamente involucrad": "Escasamente involucrados",
+    "escasamente implicad": "Escasamente involucrados",
+    "sin participación": "Sin participación",
+    "no participa": "Sin participación",
+}
+
+# MEJORA 7: Map free-form alcance text → exact DPI option
+ALCANCE_MAP: dict[str, str] = {
+    "comunidad europea": "Internacional",
+    "unión europea": "Internacional",
+    "mercado europeo": "Internacional",
+    "mercado internacional": "Internacional",
+    "exportamos a": "Internacional",
+    "ventas internacionales": "Internacional",
+    "america": "Internacional",
+    "estados unidos": "Internacional",
+    "reino unido": "Internacional",
+    "nacional": "Nacional",
+    "mercado nacional": "Nacional",
+    "península": "Nacional",
+    "solo españa": "Nacional",
+    "insular": "Insular",
+    "solo canarias": "Insular",
+    "mercado canario": "Insular",
 }
 
 # Opciones válidas por criterio — usadas para validar la respuesta de Claude
@@ -85,6 +123,28 @@ CRITERION_OPTIONS: dict[str, list[str]] = {
 
 EXTRACTOR_PROMPT = """Analiza el siguiente documento de empresa y extrae dos grupos de información.
 
+El documento puede ser un cuestionario DPI (Diagnóstico de Potencial de Internacionalización)
+del programa Canarias Expande / Cámara de Comercio. En ese caso, las respuestas aparecen
+directamente tras cada pregunta. Lee la respuesta dada, NO la pregunta.
+
+EJEMPLOS de lectura del cuestionario Canarias Expande:
+• "Año de inicio de la actividad empresarial: 2020" → año_inicio = 2020
+• "Número de empleados: 4 personas a tiempo completo" → num_empleados = "Más de 2"
+• "Facturación total durante el ejercicio 2024: Menos de 250.000 €" → facturacion (aproximar al rango DPI)
+• "Evolución de la facturación en los últimos 3 años: En crecimiento" → evolucion_facturacion = "En crecimiento"
+• "¿Dispone de recursos económicos y humanos para un plan de internacionalización? Sí, contamos..." → recursos_internacionalizacion = "Sí"
+• "Experiencia exportadora: Hemos exportado de forma puntual..." → experiencia_internacional = "Menos de 3 años"
+• "Alcance actual de la actividad comercial: Nacional" → alcance_actividad = "Nacional"
+• "Número de países donde vende regularmente: Ninguno" → num_paises = "Ninguno"
+• "¿Tiene personal dedicado exclusivamente a comercio exterior? No" → personal_dedicado = "No"
+• "Implicación de la gerencia: La fundadora está Directamente involucrada..." → involuccion_gerencia = "Directamente involucrados"
+• "Grado de adaptación de la oferta a la demanda internacional: Media" → adaptacion_demanda = "Media"
+• "Grado de adaptación del producto al mercado internacional: Alta" → adaptacion_producto = "Alta"
+• "¿Dispone de página web corporativa? Sí tiene web..." → tiene_web = "Sí" (WEB = null si no da la URL)
+• "Tienda online: Sin tienda web propia actualmente" → ecommerce = "Sin tienda web propia"
+• "Presencia en mercados electrónicos: Con presencia pero sin ventas regulares" → mercados_electronicos = "Con presencia pero sin ventas"
+• "Actividad en redes sociales: Redes sociales activas y planificadas" → redes_sociales = "Redes sociales activas y planificadas"
+
 GRUPO 1 — DATOS DIRECTOS (si aparecen en el documento):
 - Razon_Social: nombre legal de la empresa
 - CIF: identificador fiscal
@@ -117,6 +177,7 @@ mercados_electronicos → opciones: "Sin presencia en mercados electrónicos" | 
 redes_sociales → opciones: "Redes sociales inactivas o inexistentes" | "Redes sociales activas y planificadas" | "Redes sociales que generan ventas"
 
 INSTRUCCIONES:
+- Si el documento es un cuestionario con respuestas explícitas, usa confianza ≥ 0.95 para esas respuestas.
 - Usa null si la información no aparece o no es suficiente para elegir con confianza ≥ 0.7.
 - La confianza refleja qué tan seguro estás: 0.0 = adivinanza, 1.0 = dato explícito en el documento.
 - Responde ÚNICAMENTE con JSON válido, sin markdown.
@@ -340,6 +401,16 @@ def _normalize_selections(data: dict, text: str) -> dict:
         if not selections.get("tiene_web"):
             selections["tiene_web"] = "Sí"
             confidence["tiene_web"] = 1.0
+
+    # MEJORA 7: normalize involuccion_gerencia
+    inv = selections.get("involuccion_gerencia")
+    if inv and inv not in CRITERION_OPTIONS["involuccion_gerencia"]:
+        selections["involuccion_gerencia"] = _apply_value_map(inv, INVOLUCCION_MAP)
+
+    # MEJORA 7: normalize alcance_actividad
+    alc = selections.get("alcance_actividad")
+    if alc and alc not in CRITERION_OPTIONS["alcance_actividad"]:
+        selections["alcance_actividad"] = _apply_value_map(alc, ALCANCE_MAP)
 
     data["selections"] = selections
     data["confidence"] = confidence

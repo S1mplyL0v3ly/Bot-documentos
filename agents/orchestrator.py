@@ -35,6 +35,8 @@ CRITERION_QUESTIONS: dict[str, str] = {
     "redes_sociales": "¿Cuál es el nivel de actividad en redes sociales?\n   → Redes sociales inactivas o inexistentes / Redes sociales activas y planificadas / Redes sociales que generan ventas",
 }
 
+QUESTION_BATCH_SIZE = 6  # Max criteria per WhatsApp message
+
 DRAFT_PROMPT = """Eres un experto en internacionalización empresarial. Basándote en el perfil DPI de la empresa, genera el análisis para el informe.
 
 PERFIL DE LA EMPRESA:
@@ -237,8 +239,12 @@ def generate_questions(db: Session, document_id: int) -> str:
         if sector:
             empresa_ctx += f" ({sector})"
 
+    # Batch: only show first QUESTION_BATCH_SIZE criteria per message
+    batch = null_criteria[:QUESTION_BATCH_SIZE]
+    remaining_count = len(null_criteria) - len(batch)
+
     blocks = []
-    for i, key in enumerate(null_criteria, 1):
+    for i, key in enumerate(batch, 1):
         raw = CRITERION_QUESTIONS.get(key, f"Criterio: {key}")
         if "\n   → " in raw:
             question_text, options_str = raw.split("\n   → ", 1)
@@ -256,16 +262,23 @@ def generate_questions(db: Session, document_id: int) -> str:
         blocks.append(f"{header}*{i}. {question_text}*\n{option_lines}")
 
     questions_text = "\n\n".join(blocks)
+    more_note = (
+        f"\n\n_({remaining_count} pregunta{'s' if remaining_count != 1 else ''} más en el siguiente mensaje)_"
+        if remaining_count > 0
+        else ""
+    )
 
     return (
         f"🔍 *ANÁLISIS COMPLETADO*\n\n"
         f"He podido completar automáticamente *{completados} de "
         f"{total} criterios* del informe.\n\n"
-        f"Necesito que respondas las siguientes preguntas:\n\n"
+        f"Necesito que respondas estas preguntas "
+        f"({len(batch)} de {len(null_criteria)} pendientes):\n\n"
         f"{questions_text}\n\n"
         f"{'─' * 30}\n"
         f"💡 _Responde con el número de la opción elegida_\n"
         f"_Ej: '1' para la primera opción_"
+        f"{more_note}"
     )
 
 

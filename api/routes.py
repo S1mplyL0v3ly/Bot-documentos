@@ -1,5 +1,6 @@
 """FastAPI route definitions."""
 
+import asyncio
 from pathlib import Path
 
 from fastapi import (
@@ -92,6 +93,7 @@ async def _bg_process_wa_document(
         "El proceso tarda aproximadamente *2-3 minutos*.\n\n"
         "Te avisaré cuando esté listo. 🔄",
     )
+    await asyncio.sleep(2)
 
     result = await process_document(db, document_id, dest_path)
     status = result.get("status")
