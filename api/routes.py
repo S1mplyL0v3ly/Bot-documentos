@@ -2,8 +2,16 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+)
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from agents.orchestrator import (
@@ -13,7 +21,7 @@ from agents.orchestrator import (
     process_document,
 )
 from api.schemas import ApprovalPayload, DocumentStatus, FieldsUpdate, PipelineResult
-from config import BASE_DIR
+from config import BASE_DIR, settings
 from database import crud
 from database.init_db import init_db
 
@@ -53,6 +61,19 @@ async def _run_pipeline(db: Session, document_id: int, file_path: Path) -> None:
 
 
 # ─── WEBHOOKS ─────────────────────────────────────────────────────────────────
+
+
+@router.get("/webhook/whatsapp")
+async def verify_whatsapp_webhook(
+    hub_mode: str = Query(None, alias="hub.mode"),
+    hub_verify_token: str = Query(None, alias="hub.verify_token"),
+    hub_challenge: str = Query(None, alias="hub.challenge"),
+):
+    """Webhook verification endpoint required by Meta."""
+    if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_verify_token:
+        return PlainTextResponse(content=hub_challenge, status_code=200)
+
+    raise HTTPException(status_code=403, detail="Verification failed")
 
 
 @router.post("/webhook/whatsapp", response_model=PipelineResult, status_code=202)
