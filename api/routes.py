@@ -85,6 +85,14 @@ async def _bg_process_wa_document(
         )
         return
 
+    await send_text(
+        sender,
+        "📄 *Documento recibido correctamente*\n\n"
+        "⏳ Estoy analizando el documento con IA...\n"
+        "El proceso tarda aproximadamente *2-3 minutos*.\n\n"
+        "Te avisaré cuando esté listo. 🔄",
+    )
+
     result = await process_document(db, document_id, dest_path)
     status = result.get("status")
 
@@ -110,6 +118,16 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
             result = generate_final_docx(db, doc.id)
             if result["status"] == "complete":
                 output_path = result["output_path"]
+                razon_social = result.get("empresa_name", "tu empresa")
+                await send_text(
+                    sender,
+                    "✅ *¡Informe finalizado!*\n\n"
+                    f"📊 *Informe DPI — {razon_social}*\n\n"
+                    "Te envío ahora el documento Word (.docx) con el\n"
+                    "informe completo de diagnóstico de potencial\n"
+                    "de internacionalización.\n\n"
+                    "📎 _El archivo se descargará automáticamente._",
+                )
                 await wa_send_document(sender, output_path, Path(output_path).name)
         else:
             await send_text(sender, "No tengo ningún informe pendiente de aprobación.")

@@ -214,18 +214,38 @@ def generate_questions(db: Session, document_id: int) -> str:
     if not null_criteria:
         return ""
 
-    lines = [
-        "Para completar tu informe DPI necesito que respondas las siguientes preguntas:\n"
-    ]
-    for i, key in enumerate(null_criteria, 1):
-        question = CRITERION_QUESTIONS.get(key, f"Criterio: {key}")
-        lines.append(f"• {i}. {question}")
+    total = len(CRITERION_OPTIONS)
+    completados = total - len(null_criteria)
+    _num_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
-    lines.append(
-        "\nResponde con el número y la opción elegida, por ejemplo:\n"
-        "1. Más de 2 años\n2. Más de 2\n3. En crecimiento"
+    blocks = []
+    for i, key in enumerate(null_criteria, 1):
+        raw = CRITERION_QUESTIONS.get(key, f"Criterio: {key}")
+        if "\n   → " in raw:
+            question_text, options_str = raw.split("\n   → ", 1)
+            options = [o.strip() for o in options_str.split(" / ")]
+        else:
+            question_text = raw
+            options = CRITERION_OPTIONS.get(key, [])
+
+        option_lines = "\n".join(
+            f"  {_num_emojis[j] if j < len(_num_emojis) else f'{j + 1}.'} {opt}"
+            for j, opt in enumerate(options)
+        )
+        blocks.append(f"*{i}. {question_text}*\n{option_lines}")
+
+    questions_text = "\n\n".join(blocks)
+
+    return (
+        f"🔍 *ANÁLISIS COMPLETADO*\n\n"
+        f"He podido completar automáticamente *{completados} de "
+        f"{total} criterios* del informe.\n\n"
+        f"Necesito que respondas las siguientes preguntas:\n\n"
+        f"{questions_text}\n\n"
+        f"{'─' * 30}\n"
+        f"💡 _Responde con el número de la opción elegida_\n"
+        f"_Ej: '1' para la primera opción_"
     )
-    return "\n".join(lines)
 
 
 # ─── FASE 2b: Parse WhatsApp text reply ───────────────────────────────────────
@@ -333,13 +353,25 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
     crud.update_document_status(db, document_id, "waiting_approval")
     _log_to_jarvis(True, document_id, "fase3_draft_ready")
 
-    empresa = direct.get("Razon_Social", "")
+    empresa = direct.get("Razon_Social", "Empresa")
+    sep = "─" * 30
     draft_preview = (
-        f"He generado el borrador del informe para {empresa}.\n\n"
-        f"DAFO — FORTALEZAS:\n{draft.get('dafo_fortalezas', '')}\n\n"
-        f"DEFINICIÓN DEL POTENCIAL:\n{draft.get('definicion_potencial', '')[:300]}...\n\n"
-        "¿Apruebas este borrador o quieres cambios en alguna sección? "
-        "Responde 'Apruebo' o indica qué sección cambiar y cómo."
+        f"📋 *BORRADOR DEL INFORME DPI*\n"
+        f"🏢 *{empresa}*\n"
+        f"{sep}\n\n"
+        f"💪 *FORTALEZAS*\n{draft.get('dafo_fortalezas', '')}\n\n"
+        f"⚠️ *DEBILIDADES*\n{draft.get('dafo_debilidades', '')}\n\n"
+        f"🚀 *OPORTUNIDADES*\n{draft.get('dafo_oportunidades', '')}\n\n"
+        f"🔴 *AMENAZAS*\n{draft.get('dafo_amenazas', '')}\n\n"
+        f"{sep}\n"
+        f"📝 *DEFINICIÓN DEL POTENCIAL*\n{draft.get('definicion_potencial', '')}\n\n"
+        f"{sep}\n"
+        f"📌 *CONCLUSIONES*\n{draft.get('conclusiones', '')}\n\n"
+        f"{sep}\n"
+        f"✅ ¿Apruebas este borrador?\n\n"
+        f"• Responde *APRUEBO* para generar el informe final\n"
+        f"• O indica qué sección cambiar:\n"
+        f"  _Ej: 'Cambia las fortalezas: añade...'_"
     )
     return {"status": "waiting_approval", "draft_message": draft_preview}
 
@@ -373,7 +405,11 @@ def generate_final_docx(db: Session, document_id: int) -> dict:
     crud.update_document_status(db, document_id, "complete")
     _log_to_jarvis(True, document_id, f"fase4_complete path={output_path.name}")
 
-    return {"status": "complete", "output_path": str(output_path)}
+    return {
+        "status": "complete",
+        "output_path": str(output_path),
+        "empresa_name": empresa_name,
+    }
 
 
 async def apply_draft_changes(db: Session, document_id: int, changes_text: str) -> dict:
