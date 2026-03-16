@@ -553,3 +553,37 @@ def test_two_document_flow():
     assert result is mock_doc
     assert result.id == 42
     assert result.status == "waiting_transcript"
+
+
+# ─── Visual PDF detection ─────────────────────────────────────────────────────
+
+
+def test_read_google_forms_pdf_atelier_maria():
+    """Verifica detección visual de casillas en PDF real de Google Forms."""
+    import os
+
+    pdf_path = str(FIXTURES_DIR / "cuestionario_atelier.pdf")
+
+    if not os.path.exists(pdf_path):
+        pytest.skip("PDF de prueba no disponible")
+
+    from agents.extractor import read_google_forms_pdf
+
+    result = read_google_forms_pdf(pdf_path)
+    selected = [opt["text"] for opt in result["selected_options"]]
+
+    assert any(
+        "Empresario" in s or "autónomo" in s for s in selected
+    ), f"Tipo entidad no detectado. Seleccionados: {selected}"
+    assert any(
+        "250.000" in s for s in selected
+    ), f"Facturación no detectada. Seleccionados: {selected}"
+    assert any(
+        "exportado nunca" in s for s in selected
+    ), f"Experiencia no detectada. Seleccionados: {selected}"
+    assert any(
+        "involucrados" in s.lower() for s in selected
+    ), f"Gerencia no detectada. Seleccionados: {selected}"
+    assert any(
+        s.strip() == "Sí" for s in selected
+    ), f"Página web no detectada. Seleccionados: {selected}"

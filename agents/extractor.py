@@ -254,18 +254,97 @@ def run_claude(prompt: str) -> str:
     return result.stdout.strip()
 
 
+_GOOGLE_FORMS_ORANGE = (0.702, 0.4275, 0)  # stroke color of selected radio button
+
+
+def _is_orange(color: object) -> bool:
+    """Return True if color matches Google Forms' selection orange."""
+    if not color or not isinstance(color, (list, tuple)) or len(color) < 3:
+        return False
+    return all(abs(a - b) < 0.05 for a, b in zip(color, _GOOGLE_FORMS_ORANGE))
+
+
+def read_google_forms_pdf(pdf_path: str) -> dict:
+    """Read a Google Forms PDF and detect selected checkboxes and radio buttons.
+
+    Patterns detected via curve geometry (verified on Canarias Expande 2025 PDFs):
+    - Radio button selected: curve pts=18, stroke=True, fill=False,
+      non_stroking_color=(0.702, 0.4275, 0) — orange inner dot
+    - Checkbox selected: curve pts=5, fill=True — tick mark
+      (deduplicated by y position, as tick pairs share the same y)
+
+    Returns:
+        dict with 'selected_options': list of {text, type, y}
+    """
+    import pdfplumber
+
+    selected_options = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            words = page.extract_words()
+            curves = page.curves
+            page_height = page.height
+
+            # Radio buttons — pts=18 with orange stroke color (not fill)
+            for curve in curves:
+                if (
+                    len(curve["pts"]) == 18
+                    and curve.get("stroke") is True
+                    and _is_orange(curve.get("non_stroking_color"))
+                ):
+                    y_pos = page_height - curve["y0"]
+                    near_words = [w for w in words if abs(w["top"] - y_pos) < 15]
+                    if near_words:
+                        text = " ".join(w["text"] for w in near_words)
+                        selected_options.append(
+                            {"text": text, "type": "radio", "y": y_pos}
+                        )
+
+            # Checkboxes — tick mark has 5 points; deduplicate by y position
+            checkbox_ys: set[float] = set()
+            for curve in curves:
+                if len(curve["pts"]) == 5 and curve.get("fill") is True:
+                    y_rounded = round(curve["y0"], 0)
+                    if y_rounded not in checkbox_ys:
+                        checkbox_ys.add(y_rounded)
+                        y_pos = page_height - curve["y0"]
+                        near_words = [w for w in words if abs(w["top"] - y_pos) < 15]
+                        if near_words:
+                            text = " ".join(w["text"] for w in near_words)
+                            selected_options.append(
+                                {"text": text, "type": "checkbox", "y": y_pos}
+                            )
+
+    return {"selected_options": selected_options}
+
+
 def read_document_text(file_path: Path) -> str:
     """Extract raw text from a document file.
 
     Supports: .pdf, .docx, .txt, .png, .jpg, .jpeg
+    For PDFs: uses visual checkbox/radio detection first, then appends full text.
     """
     suffix = file_path.suffix.lower()
 
     if suffix == ".pdf":
         import pdfplumber
 
-        with pdfplumber.open(file_path) as pdf:
-            return "\n".join(page.extract_text() or "" for page in pdf.pages)
+        forms_data = read_google_forms_pdf(str(file_path))
+        selected = forms_data["selected_options"]
+
+        lines = ["=== OPCIONES SELECCIONADAS EN EL FORMULARIO ===\n"]
+        for opt in selected:
+            marker = "☑" if opt["type"] == "checkbox" else "◉"
+            lines.append(f"{marker} {opt['text']}")
+
+        with pdfplumber.open(str(file_path)) as pdf:
+            full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+        lines.append("\n=== TEXTO COMPLETO DEL FORMULARIO ===\n")
+        lines.append(full_text)
+
+        return "\n".join(lines)
 
     if suffix == ".docx":
         from docx import Document
