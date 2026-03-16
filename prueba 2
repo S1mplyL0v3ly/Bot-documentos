@@ -1,0 +1,99 @@
+import os
+import json
+from google import genai
+from docx import Document
+
+# --- 1. CONFIGURACIÓN ---
+API_KEY = "AIzaSyDTH1P_-TXrYepmh6f6_t1faR_hqvlHeHU" # Pon tu llave aquí
+MODEL_ID = "gemini-2.5-flash" 
+
+client = genai.Client(api_key=API_KEY)
+
+# Rutas para Windows (fíjate en la 'r' antes de las comillas para evitar errores de barras)
+BASE_DIR = r"C:\Users\didix\Documents\Proyectos python\prueba 1"
+RUTA_TXT = os.path.join(BASE_DIR, "reunion.txt")
+RUTA_PLANTILLA = os.path.join(BASE_DIR, "Plantilla informe canarias - Copia.docx")
+RUTA_SALIDA = os.path.join(BASE_DIR, "Informe_Final_Windows.docx")
+
+# --- 2. FUNCIÓN PARA ANALIZAR CON IA ---
+def analizar_bloque_1(texto_reunion):
+    print("🔍 Iniciando extracción y búsqueda de datos generales...")
+    
+    prompt = f"""
+    Analiza este texto de reunión: "{texto_reunion}"
+    
+    Extrae los siguientes datos para un informe oficial:
+    1. Razon_Social
+    2. CIF
+    3. Web
+    4. Persona_Contacto
+    5. Cargo
+    6. Email
+    7. Teléfono
+    8. Fecha reunión    
+    9. Informe realizado por (quién redacta el informe)
+    10. Fecha de redacción 
+    
+    INSTRUCCIONES CRUCIALES:
+    - Si el dato aparece en el texto, extráelo tal cual.
+    - Si el dato NO aparece (ejemplo: no dijeron el CIF), intenta deducirlo o buscarlo si conoces la empresa.
+    - Si NO consigues encontrar el dato de ninguna forma o no estás 100% seguro, escribe "REVISAR" en ese campo.
+    
+    Devuelve la respuesta en formato JSON puro.
+    """
+    
+    try:
+        response = client.models.generate_content(model=MODEL_ID, contents=prompt)
+        datos = json.loads(response.text.strip().replace('```json', '').replace('```', ''))
+        
+        # Mostramos qué datos necesitan revisión
+        for clave, valor in datos.items():
+            if valor == "REVISAR":
+                print(f"⚠️ El campo '{clave}' no ha sido encontrado. Se ha marcado para revisión.")
+        
+        return datos
+    except Exception as e:
+        print(f"❌ Error en el análisis: {e}")
+        return None
+
+# --- 3. FUNCIÓN PARA RELLENAR EL WORD (Párrafos + Tablas) ---
+def rellenar_word(datos_ia):
+    if not datos_ia: return
+
+    print("📝 Rellenando la plantilla Word...")
+    doc = Document(RUTA_PLANTILLA)
+
+    # Función interna para buscar y reemplazar
+    def buscar_y_reemplazar(objeto_donde_buscar):
+        for tag_simple, valor in datos_ia.items():
+            etiqueta_completa = f"{{{{{tag_simple}}}}}" # Esto busca {{Razon_Social}}
+            if etiqueta_completa in objeto_donde_buscar.text:
+                print(f"✅ Reemplazando {etiqueta_completa}")
+                objeto_donde_buscar.text = objeto_donde_buscar.text.replace(etiqueta_completa, str(valor))
+
+    # BUSCAR EN PÁRRAFOS NORMALES
+    for p in doc.paragraphs:
+        buscar_y_reemplazar(p)
+
+    # BUSCAR DENTRO DE LAS TABLAS (Tu CIF y Web suelen estar aquí)
+    for tabla in doc.tables:
+        for fila in tabla.rows:
+            for celda in fila.cells:
+                for p in celda.paragraphs:
+                    buscar_y_reemplazar(p)
+
+    doc.save(RUTA_SALIDA)
+    print(f"🎉 ¡HECHO! Archivo creado en: {RUTA_SALIDA}")
+
+# --- 4. EJECUCIÓN PRINCIPAL ---
+if __name__ == "__main__":
+    if os.path.exists(RUTA_TXT) and os.path.exists(RUTA_PLANTILLA):
+        with open(RUTA_TXT, "r", encoding="utf-8") as f:
+            texto = f.read()
+        
+    resultado_ia = analizar_bloque_1(texto)
+    if resultado_ia:
+            print(f"🔍 Datos encontrados por IA: {resultado_ia}")
+            rellenar_word(resultado_ia)
+    else:
+        print("❌ Error: No se encuentra 'reunion.txt' o la plantilla en la carpeta.")
