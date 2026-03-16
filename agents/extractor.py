@@ -1,4 +1,4 @@
-"""Field extractor from documents using Claude headless."""
+"""Field extractor for DPI Canarias documents using Claude headless."""
 
 import json
 import subprocess
@@ -7,20 +7,139 @@ from typing import Optional
 
 from config import settings
 
-EXTRACTOR_PROMPT = """Extrae los siguientes campos del documento. Para cada campo devuelve el valor encontrado y un nivel de confianza del 0.0 al 1.0.
+# Opciones válidas por criterio — usadas para validar la respuesta de Claude
+CRITERION_OPTIONS: dict[str, list[str]] = {
+    "situacion_empresa": ["No constituida", "Menos de 2 años", "Más de 2 años"],
+    "num_empleados": ["Menos de 2", "Más de 2"],
+    "facturacion": [
+        "Menos de 200.000 €",
+        "Entre 200.000 y 500.000 €",
+        "Entre 500.000 y 1.000.000 €",
+        "Más de 1.000.000 €",
+    ],
+    "evolucion_facturacion": ["En decrecimiento", "Estable", "En crecimiento"],
+    "recursos_internacionalizacion": ["No", "Sí"],
+    "experiencia_internacional": ["Ninguna", "Menos de 3 años", "Más de 5 años"],
+    "alcance_actividad": ["Insular", "Nacional", "Internacional"],
+    "num_paises": ["Ninguno", "De 1 a 5", "Más de 5"],
+    "personal_dedicado": ["No", "Sí"],
+    "involuccion_gerencia": [
+        "Sin participación",
+        "Escasamente involucrados",
+        "Medianamente involucrados",
+        "Directamente involucrados",
+    ],
+    "adaptacion_demanda": ["Baja", "Media", "Alta"],
+    "adaptacion_producto": ["Baja", "Media", "Alta"],
+    "tiene_web": ["No", "Sí"],
+    "ecommerce": [
+        "Sin tienda web propia",
+        "Tienda web propia con ventas bajas",
+        "Tienda web propia con ventas regulares a nivel nacional",
+        "Tienda web propia con ventas regulares a nivel internacional",
+    ],
+    "mercados_electronicos": [
+        "Sin presencia en mercados electrónicos",
+        "Con presencia pero sin ventas",
+        "Con ventas nacionales",
+        "Con ventas internacionales",
+    ],
+    "redes_sociales": [
+        "Redes sociales inactivas o inexistentes",
+        "Redes sociales activas y planificadas",
+        "Redes sociales que generan ventas",
+    ],
+}
 
-Campos a extraer: {fields}
+EXTRACTOR_PROMPT = """Analiza el siguiente documento de empresa y extrae dos grupos de información.
 
-Responde ÚNICAMENTE con JSON válido, sin markdown, con este formato exacto:
+GRUPO 1 — DATOS DIRECTOS (si aparecen en el documento):
+- Razon_Social: nombre legal de la empresa
+- CIF: identificador fiscal
+- WEB: página web
+- Persona_Contacto: nombre de la persona de contacto
+- Cargo: cargo de la persona de contacto
+- email: correo electrónico de contacto
+- Telefono_Contacto: teléfono
+
+GRUPO 2 — CRITERIOS DPI (elige la opción MÁS ADECUADA para cada criterio, o null si no hay información suficiente):
+
+situacion_empresa → opciones: "No constituida" | "Menos de 2 años" | "Más de 2 años"
+num_empleados → opciones: "Menos de 2" | "Más de 2"
+facturacion → opciones: "Menos de 200.000 €" | "Entre 200.000 y 500.000 €" | "Entre 500.000 y 1.000.000 €" | "Más de 1.000.000 €"
+evolucion_facturacion → opciones: "En decrecimiento" | "Estable" | "En crecimiento"
+recursos_internacionalizacion → opciones: "No" | "Sí"
+experiencia_internacional → opciones: "Ninguna" | "Menos de 3 años" | "Más de 5 años"
+alcance_actividad → opciones: "Insular" | "Nacional" | "Internacional"
+num_paises → opciones: "Ninguno" | "De 1 a 5" | "Más de 5"
+personal_dedicado → opciones: "No" | "Sí"
+involuccion_gerencia → opciones: "Sin participación" | "Escasamente involucrados" | "Medianamente involucrados" | "Directamente involucrados"
+adaptacion_demanda → opciones: "Baja" | "Media" | "Alta"
+adaptacion_producto → opciones: "Baja" | "Media" | "Alta"
+tiene_web → opciones: "No" | "Sí"  (si hay WEB en datos directos → "Sí" automáticamente)
+ecommerce → opciones: "Sin tienda web propia" | "Tienda web propia con ventas bajas" | "Tienda web propia con ventas regulares a nivel nacional" | "Tienda web propia con ventas regulares a nivel internacional"
+mercados_electronicos → opciones: "Sin presencia en mercados electrónicos" | "Con presencia pero sin ventas" | "Con ventas nacionales" | "Con ventas internacionales"
+redes_sociales → opciones: "Redes sociales inactivas o inexistentes" | "Redes sociales activas y planificadas" | "Redes sociales que generan ventas"
+
+INSTRUCCIONES:
+- Usa null si la información no aparece o no es suficiente para elegir con confianza ≥ 0.7.
+- La confianza refleja qué tan seguro estás: 0.0 = adivinanza, 1.0 = dato explícito en el documento.
+- Responde ÚNICAMENTE con JSON válido, sin markdown.
+
+Formato exacto de respuesta:
 {{
-  "extracted": {{
-    "nombre_campo": {{"value": "valor encontrado o null", "confidence": 0.0}}
+  "direct_fields": {{
+    "Razon_Social": "valor o null",
+    "CIF": "valor o null",
+    "WEB": "valor o null",
+    "Persona_Contacto": "valor o null",
+    "Cargo": "valor o null",
+    "email": "valor o null",
+    "Telefono_Contacto": "valor o null"
+  }},
+  "selections": {{
+    "situacion_empresa": "opción exacta o null",
+    "num_empleados": "opción exacta o null",
+    "facturacion": "opción exacta o null",
+    "evolucion_facturacion": "opción exacta o null",
+    "recursos_internacionalizacion": "opción exacta o null",
+    "experiencia_internacional": "opción exacta o null",
+    "alcance_actividad": "opción exacta o null",
+    "num_paises": "opción exacta o null",
+    "personal_dedicado": "opción exacta o null",
+    "involuccion_gerencia": "opción exacta o null",
+    "adaptacion_demanda": "opción exacta o null",
+    "adaptacion_producto": "opción exacta o null",
+    "tiene_web": "opción exacta o null",
+    "ecommerce": "opción exacta o null",
+    "mercados_electronicos": "opción exacta o null",
+    "redes_sociales": "opción exacta o null"
+  }},
+  "confidence": {{
+    "situacion_empresa": 0.0,
+    "num_empleados": 0.0,
+    "facturacion": 0.0,
+    "evolucion_facturacion": 0.0,
+    "recursos_internacionalizacion": 0.0,
+    "experiencia_internacional": 0.0,
+    "alcance_actividad": 0.0,
+    "num_paises": 0.0,
+    "personal_dedicado": 0.0,
+    "involuccion_gerencia": 0.0,
+    "adaptacion_demanda": 0.0,
+    "adaptacion_producto": 0.0,
+    "tiene_web": 0.0,
+    "ecommerce": 0.0,
+    "mercados_electronicos": 0.0,
+    "redes_sociales": 0.0
   }}
 }}
 
-Texto del documento:
+DOCUMENTO:
 {text}
 """
+
+CONFIDENCE_THRESHOLD = 0.7
 
 
 def run_claude(prompt: str) -> str:
@@ -39,7 +158,7 @@ def run_claude(prompt: str) -> str:
 def read_document_text(file_path: Path) -> str:
     """Extract raw text from a document file.
 
-    Supports: .pdf, .docx, .txt, .png, .jpg, .jpeg (vision via Claude)
+    Supports: .pdf, .docx, .txt, .png, .jpg, .jpeg
     """
     suffix = file_path.suffix.lower()
 
@@ -58,42 +177,66 @@ def read_document_text(file_path: Path) -> str:
     if suffix in {".txt", ".md", ".csv"}:
         return file_path.read_text(encoding="utf-8")
 
-    # Imágenes → Claude vision (pasar path, Claude maneja multimodal)
     if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        # Claude vision: pass path as special marker, orchestrator handles multimodal
         return f"[IMAGE_FILE:{file_path.as_posix()}]"
 
     return ""
 
 
-def extract_fields(text: str, expected_fields: list[str]) -> dict[str, dict]:
-    """Extract named fields from document text using Claude.
-
-    Args:
-        text: Raw text from the document.
-        expected_fields: List of field names to extract.
-
-    Returns:
-        dict mapping field_name → {value, confidence}
-    """
-    fields_str = (
-        ", ".join(expected_fields) if expected_fields else "todos los campos relevantes"
-    )
-    prompt = EXTRACTOR_PROMPT.format(
-        fields=fields_str,
-        text=text[:5000],
-    )
-    raw = run_claude(prompt)
-
+def _parse_json_response(raw: str) -> dict:
+    """Try to parse JSON from Claude response, with fallback extraction."""
     try:
-        data = json.loads(raw)
-        return data.get("extracted", {})
+        return json.loads(raw)
     except json.JSONDecodeError:
         start = raw.find("{")
         end = raw.rfind("}") + 1
         if start != -1 and end > start:
             try:
-                data = json.loads(raw[start:end])
-                return data.get("extracted", {})
+                return json.loads(raw[start:end])
             except json.JSONDecodeError:
                 pass
     return {}
+
+
+def _null_low_confidence(data: dict) -> dict:
+    """Set selections to null when confidence < CONFIDENCE_THRESHOLD.
+
+    Args:
+        data: Parsed response from Claude with direct_fields, selections, confidence.
+
+    Returns:
+        Same dict with low-confidence selections nulled out.
+    """
+    selections = data.get("selections", {})
+    confidence = data.get("confidence", {})
+    nulled = dict(selections)
+    for key, value in selections.items():
+        if value is not None and float(confidence.get(key, 0.0)) < CONFIDENCE_THRESHOLD:
+            nulled[key] = None
+    data["selections"] = nulled
+    return data
+
+
+def extract_dpi_fields(text: str) -> dict:
+    """Extract DPI fields and selections from document text using Claude.
+
+    Args:
+        text: Raw text from the document (up to 6000 chars).
+
+    Returns:
+        dict with keys: direct_fields, selections, confidence
+        Selections with confidence < 0.7 are set to null.
+    """
+    prompt = EXTRACTOR_PROMPT.format(text=text[:6000])
+    raw = run_claude(prompt)
+    data = _parse_json_response(raw)
+
+    if not data:
+        return {
+            "direct_fields": {},
+            "selections": {k: None for k in CRITERION_OPTIONS},
+            "confidence": {k: 0.0 for k in CRITERION_OPTIONS},
+        }
+
+    return _null_low_confidence(data)

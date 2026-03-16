@@ -1,19 +1,21 @@
 """FastAPI route definitions."""
 
-import asyncio
 from pathlib import Path
-from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from agents.orchestrator import process_document
-from api.schemas import DocumentStatus, FieldsUpdate, PipelineResult
+from agents.orchestrator import (
+    apply_draft_changes,
+    generate_final_docx,
+    generate_questions,
+    process_document,
+)
+from api.schemas import ApprovalPayload, DocumentStatus, FieldsUpdate, PipelineResult
 from config import BASE_DIR
 from database import crud
 from database.init_db import init_db
-from database.models import Document
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,8 +48,11 @@ def _save_upload(upload: UploadFile) -> Path:
 
 
 async def _run_pipeline(db: Session, document_id: int, file_path: Path) -> None:
-    """Background task wrapper for the pipeline."""
+    """Background task: FASE 1 → auto-triggers FASE 2/3 as needed."""
     await process_document(db, document_id, file_path)
+
+
+# ─── WEBHOOKS ─────────────────────────────────────────────────────────────────
 
 
 @router.post("/webhook/whatsapp", response_model=PipelineResult, status_code=202)
@@ -57,14 +62,14 @@ async def webhook_whatsapp(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Receive a document from WhatsApp and start processing."""
+    """Receive a document from WhatsApp and start FASE 1 processing."""
     file_path = _save_upload(file)
     doc = crud.create_document(db, "whatsapp", sender_id, file.filename)
     background_tasks.add_task(_run_pipeline, db, doc.id, file_path)
     return PipelineResult(
         document_id=doc.id,
         status="pending",
-        message=f"Documento recibido. Procesando en background. ID={doc.id}",
+        message=f"Documento recibido por WhatsApp. Procesando. ID={doc.id}",
     )
 
 
@@ -75,7 +80,7 @@ async def webhook_email(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Receive a document from email and start processing."""
+    """Receive a document from email and start FASE 1 processing."""
     file_path = _save_upload(file)
     doc = crud.create_document(db, "email", sender_email, file.filename)
     background_tasks.add_task(_run_pipeline, db, doc.id, file_path)
@@ -84,6 +89,9 @@ async def webhook_email(
         status="pending",
         message=f"Documento recibido vía email. Procesando. ID={doc.id}",
     )
+
+
+# ─── STATUS ───────────────────────────────────────────────────────────────────
 
 
 @router.get("/status/{doc_id}", response_model=DocumentStatus)
@@ -111,6 +119,9 @@ def get_status(doc_id: int, db: Session = Depends(get_db)):
     )
 
 
+# ─── FASE 2: User answers missing criteria ────────────────────────────────────
+
+
 @router.post("/fields/{doc_id}", response_model=PipelineResult)
 async def update_fields(
     doc_id: int,
@@ -118,32 +129,96 @@ async def update_fields(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """Accept manually provided field values and re-trigger DOCX generation."""
+    """FASE 2 response: user provides answers for null DPI criteria.
+
+    Expects {criterion_key: selected_option} in payload.fields.
+    After saving, triggers FASE 3 (draft generation) in background.
+    """
     doc = crud.get_document(db, doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
 
-    for field_name, value in payload.fields.items():
+    from agents.orchestrator import PREFIX_SELECTION, generate_draft_texts
+
+    for criterion_key, option_value in payload.fields.items():
         crud.upsert_field(
-            db, doc_id, field_name, value, confidence=1.0, source="manual"
+            db,
+            doc_id,
+            f"{PREFIX_SELECTION}{criterion_key}",
+            option_value,
+            confidence=1.0,
+            source="manual",
         )
 
-    # Re-generar DOCX con los nuevos campos
-    upload_dir = BASE_DIR / "uploads"
-    file_candidates = list(upload_dir.glob(f"*"))
-    file_path = file_candidates[0] if file_candidates else Path("/dev/null")
-    background_tasks.add_task(_run_pipeline, db, doc_id, file_path)
+    # Trigger FASE 3 in background
+    background_tasks.add_task(generate_draft_texts, db, doc_id)
 
+    remaining = generate_questions(db, doc_id)
     return PipelineResult(
         document_id=doc_id,
         status="processing",
-        message="Campos actualizados. Re-generando DOCX.",
+        message="Respuestas guardadas. Generando borrador DAFO y textos.",
+        question_message=remaining or None,
     )
+
+
+# ─── FASE 3: Approval ─────────────────────────────────────────────────────────
+
+
+@router.post("/approve/{doc_id}", response_model=PipelineResult)
+async def approve_draft(
+    doc_id: int,
+    payload: ApprovalPayload,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """FASE 3 → FASE 4: Approve draft or request changes.
+
+    - approved=true → generates final DOCX immediately.
+    - approved=false + changes → Claude revises the draft and sends it back.
+    """
+    doc = crud.get_document(db, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado.")
+
+    if doc.status not in {"waiting_approval", "complete"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El documento está en estado '{doc.status}', no puede aprobarse aún.",
+        )
+
+    if payload.approved:
+        result = generate_final_docx(db, doc_id)
+        return PipelineResult(
+            document_id=doc_id,
+            status=result["status"],
+            message="Informe DPI generado. Descárgalo en /download/{doc_id}.",
+        )
+
+    # Not approved → apply changes and re-send draft
+    if not payload.changes:
+        raise HTTPException(
+            status_code=400,
+            detail="Si no apruebas el borrador, indica los cambios en el campo 'changes'.",
+        )
+
+    async def _apply_changes_bg():
+        await apply_draft_changes(db, doc_id, payload.changes)
+
+    background_tasks.add_task(_apply_changes_bg)
+    return PipelineResult(
+        document_id=doc_id,
+        status="waiting_approval",
+        message="Aplicando tus cambios al borrador. Recibirás el borrador revisado en breve.",
+    )
+
+
+# ─── DOWNLOAD ─────────────────────────────────────────────────────────────────
 
 
 @router.get("/download/{doc_id}")
 def download_docx(doc_id: int, db: Session = Depends(get_db)):
-    """Download the generated DOCX for a document."""
+    """Download the final generated DOCX."""
     doc = crud.get_document(db, doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")

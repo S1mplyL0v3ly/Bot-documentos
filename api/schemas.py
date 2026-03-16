@@ -18,7 +18,16 @@ class DocumentStatus(BaseModel):
 
 
 class FieldsUpdate(BaseModel):
+    """User answers to FASE 2 questions: {criterion_key: selected_option}."""
+
     fields: dict[str, str]
+
+
+class ApprovalPayload(BaseModel):
+    """FASE 3 approval decision."""
+
+    approved: bool
+    changes: Optional[str] = None  # texto libre si approved=False
 
 
 class WebhookWhatsAppMessage(BaseModel):
@@ -41,3 +50,5 @@ class PipelineResult(BaseModel):
     document_type: Optional[str] = None
     missing_fields: list[str] = []
     message: str
+    question_message: Optional[str] = None
+    draft_message: Optional[str] = None
