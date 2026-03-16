@@ -40,6 +40,9 @@ DRAFT_PROMPT = """Eres un experto en internacionalización empresarial. Basándo
 PERFIL DE LA EMPRESA:
 {profile}
 
+CONTEXTO SECTORIAL:
+{context}
+
 Genera ÚNICAMENTE JSON válido, sin markdown, con este formato exacto:
 {{
   "dafo_debilidades": "texto con las debilidades detectadas (2-4 puntos)",
@@ -214,9 +217,25 @@ def generate_questions(db: Session, document_id: int) -> str:
     if not null_criteria:
         return ""
 
+    # MEJORA 6: load empresa name and sector for contextual questions
+    empresa_name = ""
+    sector = ""
+    for f in fields:
+        if f.field_name == f"{PREFIX_DIRECT}Razon_Social":
+            empresa_name = f.field_value or ""
+        elif f.field_name == f"{PREFIX_DIRECT}sector":
+            sector = f.field_value or ""
+
     total = len(CRITERION_OPTIONS)
     completados = total - len(null_criteria)
     _num_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+    # Build context prefix for each question block
+    empresa_ctx = ""
+    if empresa_name:
+        empresa_ctx = f"*{empresa_name}*"
+        if sector:
+            empresa_ctx += f" ({sector})"
 
     blocks = []
     for i, key in enumerate(null_criteria, 1):
@@ -232,7 +251,9 @@ def generate_questions(db: Session, document_id: int) -> str:
             f"  {_num_emojis[j] if j < len(_num_emojis) else f'{j + 1}.'} {opt}"
             for j, opt in enumerate(options)
         )
-        blocks.append(f"*{i}. {question_text}*\n{option_lines}")
+        # MEJORA 6: include empresa/sector context before question
+        header = f"Para {empresa_ctx}:\n" if empresa_ctx else ""
+        blocks.append(f"{header}*{i}. {question_text}*\n{option_lines}")
 
     questions_text = "\n\n".join(blocks)
 
@@ -332,7 +353,17 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
         profile_lines.append(f"{key}: {value or 'No especificado'}")
     profile = "\n".join(profile_lines)
 
-    raw = _run_claude(DRAFT_PROMPT.format(profile=profile))
+    # MEJORA 4: include sector and producto_servicio in DAFO context
+    context_parts = []
+    if direct.get("sector"):
+        context_parts.append(f"Sector: {direct['sector']}")
+    if direct.get("producto_servicio"):
+        context_parts.append(
+            f"Producto/servicio exportable: {direct['producto_servicio']}"
+        )
+    context = "\n".join(context_parts) if context_parts else "No especificado"
+
+    raw = _run_claude(DRAFT_PROMPT.format(profile=profile, context=context))
     draft = _parse_json(raw)
 
     if not draft:

@@ -272,6 +272,107 @@ def test_orchestrator_generates_questions_for_null_fields():
     assert "situacion_empresa" not in message
 
 
+def test_extractor_maps_facturacion_correctly():
+    """MEJORA 1: Non-exact facturación range is normalized to the correct DPI option."""
+    from agents.extractor import extract_dpi_fields
+
+    text = "Facturación total durante el ejercicio 2024: Menos de 250.000 €"
+    null_conf = {
+        k: 0.0
+        for k in [
+            "situacion_empresa",
+            "num_empleados",
+            "facturacion",
+            "evolucion_facturacion",
+            "recursos_internacionalizacion",
+            "experiencia_internacional",
+            "alcance_actividad",
+            "num_paises",
+            "personal_dedicado",
+            "involuccion_gerencia",
+            "adaptacion_demanda",
+            "adaptacion_producto",
+            "tiene_web",
+            "ecommerce",
+            "mercados_electronicos",
+            "redes_sociales",
+        ]
+    }
+    null_sel = {k: None for k in null_conf}
+    fake_response = json.dumps(
+        {
+            "direct_fields": {
+                "Razon_Social": None,
+                "CIF": None,
+                "WEB": None,
+                "Persona_Contacto": None,
+                "Cargo": None,
+                "email": None,
+                "Telefono_Contacto": None,
+                "sector": None,
+                "producto_servicio": None,
+                "año_inicio": None,
+            },
+            "selections": {**null_sel, "facturacion": "Menos de 250.000 €"},
+            "confidence": {**null_conf, "facturacion": 0.9},
+        }
+    )
+    with patch("agents.extractor.run_claude", return_value=fake_response):
+        result = extract_dpi_fields(text)
+    assert result["selections"]["facturacion"] == "Menos de 200.000 €"
+
+
+def test_extractor_deduces_situacion_from_year():
+    """MEJORA 3: situacion_empresa is inferred from año_inicio when Claude returns null."""
+    from agents.extractor import extract_dpi_fields
+
+    text = "Año de inicio de la actividad empresarial: 2020"
+    null_conf = {
+        k: 0.0
+        for k in [
+            "situacion_empresa",
+            "num_empleados",
+            "facturacion",
+            "evolucion_facturacion",
+            "recursos_internacionalizacion",
+            "experiencia_internacional",
+            "alcance_actividad",
+            "num_paises",
+            "personal_dedicado",
+            "involuccion_gerencia",
+            "adaptacion_demanda",
+            "adaptacion_producto",
+            "tiene_web",
+            "ecommerce",
+            "mercados_electronicos",
+            "redes_sociales",
+        ]
+    }
+    null_sel = {k: None for k in null_conf}
+    fake_response = json.dumps(
+        {
+            "direct_fields": {
+                "Razon_Social": None,
+                "CIF": None,
+                "WEB": None,
+                "Persona_Contacto": None,
+                "Cargo": None,
+                "email": None,
+                "Telefono_Contacto": None,
+                "sector": None,
+                "producto_servicio": None,
+                "año_inicio": "2020",
+            },
+            "selections": null_sel,
+            "confidence": null_conf,
+        }
+    )
+    with patch("agents.extractor.run_claude", return_value=fake_response):
+        result = extract_dpi_fields(text)
+    assert result["selections"]["situacion_empresa"] == "Más de 2 años"
+    assert result["confidence"]["situacion_empresa"] >= 0.9
+
+
 def test_approval_flow_generates_final_docx(tmp_path):
     """generate_final_docx should call render_template and update status to complete."""
     from agents.orchestrator import generate_final_docx
