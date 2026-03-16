@@ -34,6 +34,18 @@ def get_document(db: Session, document_id: int) -> Optional[Document]:
     return db.get(Document, document_id)
 
 
+def get_document_by_sender_and_status(
+    db: Session, sender_id: str, status: str
+) -> Optional[Document]:
+    """Return the most recent document for a sender that matches the given status."""
+    return (
+        db.query(Document)
+        .filter_by(sender_id=sender_id, status=status)
+        .order_by(Document.id.desc())
+        .first()
+    )
+
+
 def update_document_status(
     db: Session, document_id: int, status: str
 ) -> Optional[Document]:

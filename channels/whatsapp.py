@@ -45,6 +45,53 @@ async def send_text(recipient: str, text: str) -> bool:
         return response.status_code == 200
 
 
+async def download_media(media_id: str, dest_path: str) -> bool:
+    """Download a media file from WhatsApp CDN using its media_id.
+
+    Args:
+        media_id: The media ID received in the webhook payload.
+        dest_path: Absolute local path where the file will be saved.
+
+    Returns:
+        True if downloaded successfully.
+    """
+    if not settings.whatsapp_token:
+        print("[WhatsApp] Token not configured — skipping download.")
+        return False
+
+    url_endpoint = f"https://graph.facebook.com/v20.0/{media_id}"
+    headers = {"Authorization": f"Bearer {settings.whatsapp_token}"}
+
+    async with httpx.AsyncClient() as client:
+        # Step 1: resolve download URL
+        response = await client.get(url_endpoint, headers=headers, timeout=10.0)
+        if response.status_code != 200:
+            print(
+                f"[WhatsApp] Media URL fetch failed: {response.status_code} — {response.text}"
+            )
+            return False
+
+        download_url = response.json().get("url")
+        if not download_url:
+            print("[WhatsApp] Media URL missing from response.")
+            return False
+
+        # Step 2: download the actual bytes
+        dest = Path(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        file_response = await client.get(download_url, headers=headers, timeout=30.0)
+        if file_response.status_code != 200:
+            print(f"[WhatsApp] Media download failed: {file_response.status_code}")
+            return False
+
+        dest.write_bytes(file_response.content)
+        print(
+            f"[WhatsApp] Media downloaded: {dest} ({len(file_response.content)} bytes)"
+        )
+        return True
+
+
 async def upload_document(file_path: str) -> str | None:
     """Upload a local file to WhatsApp Media API.
 

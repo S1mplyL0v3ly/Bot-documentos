@@ -1,6 +1,7 @@
 """Pipeline orchestrator: 4-phase DPI document processing."""
 
 import json
+import re
 import sqlite3
 import subprocess
 from datetime import datetime
@@ -225,6 +226,71 @@ def generate_questions(db: Session, document_id: int) -> str:
         "1. Más de 2 años\n2. Más de 2\n3. En crecimiento"
     )
     return "\n".join(lines)
+
+
+# ─── FASE 2b: Parse WhatsApp text reply ───────────────────────────────────────
+
+
+async def process_user_response(db: Session, document_id: int, text: str) -> dict:
+    """Parse a free-text WhatsApp answer and store selections.
+
+    Expects numbered lines like "1. Más de 2 años\\n2. Más de 2".
+    Falls back to treating the whole text as a single answer if no numbers found.
+
+    Returns:
+        dict with status='waiting_user_response' (more questions remain)
+        or the result of generate_draft_texts if all criteria are filled.
+    """
+    fields = crud.get_fields(db, document_id)
+    null_criteria = [
+        f.field_name[len(PREFIX_SELECTION) :]
+        for f in fields
+        if f.field_name.startswith(PREFIX_SELECTION) and f.field_value is None
+    ]
+
+    if not null_criteria:
+        return await generate_draft_texts(db, document_id)
+
+    # Parse numbered answers ("1. answer", "1) answer", "• 1. answer")
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    answers: list[str] = []
+    for line in lines:
+        match = re.match(r"^[•\-]?\s*\d+[.)]\s*(.+)$", line)
+        if match:
+            answers.append(match.group(1).strip())
+
+    # Fallback: single answer for a single pending question
+    if not answers and len(null_criteria) == 1:
+        answers = [text.strip()]
+
+    for i, criterion in enumerate(null_criteria):
+        if i >= len(answers):
+            break
+        raw_answer = answers[i]
+        options = CRITERION_OPTIONS.get(criterion, [])
+        matched = next(
+            (
+                opt
+                for opt in options
+                if opt.lower() in raw_answer.lower()
+                or raw_answer.lower() in opt.lower()
+            ),
+            raw_answer,
+        )
+        crud.upsert_field(
+            db,
+            document_id,
+            f"{PREFIX_SELECTION}{criterion}",
+            matched,
+            confidence=1.0,
+            source="whatsapp",
+        )
+
+    remaining = generate_questions(db, document_id)
+    if remaining:
+        return {"status": "waiting_user_response", "question_message": remaining}
+
+    return await generate_draft_texts(db, document_id)
 
 
 # ─── FASE 3 ───────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Request,
     UploadFile,
 )
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -19,6 +20,7 @@ from agents.orchestrator import (
     generate_final_docx,
     generate_questions,
     process_document,
+    process_user_response,
 )
 from api.schemas import ApprovalPayload, DocumentStatus, FieldsUpdate, PipelineResult
 from config import BASE_DIR, settings
@@ -27,6 +29,14 @@ from database.init_db import init_db
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# MIME type → file extension map for WhatsApp media
+_MIME_TO_EXT: dict[str, str] = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+}
 
 router = APIRouter()
 
@@ -60,6 +70,70 @@ async def _run_pipeline(db: Session, document_id: int, file_path: Path) -> None:
     await process_document(db, document_id, file_path)
 
 
+async def _bg_process_wa_document(
+    db: Session, document_id: int, media_id: str, dest_path: Path, sender: str
+) -> None:
+    """Background: download WhatsApp media, run pipeline, reply to sender."""
+    from channels.whatsapp import download_media, send_document as wa_send_document
+    from channels.whatsapp import send_text
+
+    ok = await download_media(media_id, str(dest_path))
+    if not ok:
+        crud.update_document_status(db, document_id, "error")
+        await send_text(
+            sender, "No pude descargar tu archivo. Por favor inténtalo de nuevo."
+        )
+        return
+
+    result = await process_document(db, document_id, dest_path)
+    status = result.get("status")
+
+    if status == "waiting_user_response":
+        await send_text(sender, result["question_message"])
+    elif status == "waiting_approval":
+        await send_text(sender, result["draft_message"])
+    elif status == "error":
+        await send_text(sender, "Error procesando el documento. Inténtalo de nuevo.")
+
+
+async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
+    """Background: route incoming WhatsApp text to the correct pipeline stage."""
+    from channels.whatsapp import send_document as wa_send_document
+    from channels.whatsapp import send_text
+
+    text_lower = text.lower().strip()
+
+    # Approval keywords → FASE 4
+    if any(kw in text_lower for kw in ("apruebo", "aprobado", "aprobar")):
+        doc = crud.get_document_by_sender_and_status(db, sender, "waiting_approval")
+        if doc:
+            result = generate_final_docx(db, doc.id)
+            if result["status"] == "complete":
+                output_path = result["output_path"]
+                await wa_send_document(sender, output_path, Path(output_path).name)
+        else:
+            await send_text(sender, "No tengo ningún informe pendiente de aprobación.")
+        return
+
+    # User answering questions → FASE 2b
+    doc = crud.get_document_by_sender_and_status(db, sender, "waiting_user_response")
+    if doc:
+        result = await process_user_response(db, doc.id, text)
+        status = result.get("status")
+        if status == "waiting_user_response":
+            await send_text(sender, result.get("question_message", ""))
+        elif status == "waiting_approval":
+            await send_text(sender, result.get("draft_message", ""))
+        elif status == "error":
+            await send_text(sender, "Error procesando tus respuestas.")
+        return
+
+    # No active document found
+    await send_text(
+        sender, "Hola, envíame un documento PDF o Word para generar tu informe DPI."
+    )
+
+
 # ─── WEBHOOKS ─────────────────────────────────────────────────────────────────
 
 
@@ -76,22 +150,63 @@ async def verify_whatsapp_webhook(
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
-@router.post("/webhook/whatsapp", response_model=PipelineResult, status_code=202)
+@router.post("/webhook/whatsapp", status_code=200)
 async def webhook_whatsapp(
+    request: Request,
     background_tasks: BackgroundTasks,
-    sender_id: str,
-    file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Receive a document from WhatsApp and start FASE 1 processing."""
-    file_path = _save_upload(file)
-    doc = crud.create_document(db, "whatsapp", sender_id, file.filename)
-    background_tasks.add_task(_run_pipeline, db, doc.id, file_path)
-    return PipelineResult(
-        document_id=doc.id,
-        status="pending",
-        message=f"Documento recibido por WhatsApp. Procesando. ID={doc.id}",
-    )
+    """Receive Meta WhatsApp webhook events and route to the correct handler.
+
+    Meta requires a 200 OK response within 5 seconds. All processing is done
+    in background tasks.
+    """
+    import time
+
+    try:
+        body = await request.json()
+    except Exception:
+        return {"status": "ok"}
+
+    # Navigate Meta's nested structure: entry → changes → value → messages
+    try:
+        messages = (
+            body.get("entry", [{}])[0]
+            .get("changes", [{}])[0]
+            .get("value", {})
+            .get("messages", [])
+        )
+    except (IndexError, AttributeError, KeyError):
+        return {"status": "ok"}
+
+    if not messages:
+        return {"status": "ok"}
+
+    msg = messages[0]
+    sender = msg.get("from", "")
+    msg_type = msg.get("type", "")
+
+    if msg_type in ("document", "image"):
+        media_info = msg.get(msg_type, {})
+        media_id = media_info.get("id", "")
+        filename = media_info.get("filename") or f"documento_{int(time.time())}"
+        mime_type = media_info.get("mime_type", "")
+        ext = _MIME_TO_EXT.get(mime_type, "")
+        if ext and not filename.endswith(ext):
+            filename = f"{Path(filename).stem}{ext}"
+
+        dest_path = UPLOAD_DIR / f"{int(time.time())}_{filename}"
+        doc = crud.create_document(db, "whatsapp", sender, filename)
+        background_tasks.add_task(
+            _bg_process_wa_document, db, doc.id, media_id, dest_path, sender
+        )
+
+    elif msg_type == "text":
+        text = msg.get("text", {}).get("body", "")
+        if text:
+            background_tasks.add_task(_bg_process_wa_text, db, sender, text)
+
+    return {"status": "ok"}
 
 
 @router.post("/webhook/email", response_model=PipelineResult, status_code=202)
