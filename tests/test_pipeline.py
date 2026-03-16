@@ -373,6 +373,101 @@ def test_extractor_deduces_situacion_from_year():
     assert result["confidence"]["situacion_empresa"] >= 0.9
 
 
+def test_extractor_atelier_maria():
+    """Cuestionario Canarias Expande: normalización de campos para Atelier Maria Secretos.
+
+    Verifica que los normalizadores convierten respuestas de texto libre del cuestionario
+    a los valores DPI exactos: facturación, experiencia, involucción gerencia, situación.
+    """
+    from agents.extractor import extract_dpi_fields
+
+    fixture = Path(__file__).parent / "fixtures" / "atelier_text.txt"
+    text = fixture.read_text(encoding="utf-8")
+
+    # Claude devuelve valores que requieren normalización (texto libre del cuestionario)
+    _conf_95 = {
+        k: 0.95
+        for k in [
+            "situacion_empresa",
+            "num_empleados",
+            "facturacion",
+            "evolucion_facturacion",
+            "recursos_internacionalizacion",
+            "experiencia_internacional",
+            "alcance_actividad",
+            "num_paises",
+            "personal_dedicado",
+            "involuccion_gerencia",
+            "adaptacion_demanda",
+            "adaptacion_producto",
+            "tiene_web",
+            "ecommerce",
+            "mercados_electronicos",
+            "redes_sociales",
+        ]
+    }
+    fake_response = json.dumps(
+        {
+            "direct_fields": {
+                "Razon_Social": "Atelier Maria Secretos SL",
+                "CIF": None,
+                "WEB": None,
+                "Persona_Contacto": None,
+                "Cargo": None,
+                "email": None,
+                "Telefono_Contacto": None,
+                "sector": "Joyería y bisutería artesanal",
+                "producto_servicio": "Joyería artesanal de plata",
+                "año_inicio": "2020",
+            },
+            "selections": {
+                "situacion_empresa": None,  # debe deducirse de año_inicio=2020
+                "num_empleados": "Más de 2",
+                "facturacion": "Menos de 250.000 €",  # debe normalizarse → "Menos de 200.000 €"
+                "evolucion_facturacion": "En crecimiento",
+                "recursos_internacionalizacion": "Sí",
+                "experiencia_internacional": "No hemos exportado nunca",  # → "Ninguna"
+                "alcance_actividad": "Nacional",
+                "num_paises": "Ninguno",
+                "personal_dedicado": "No",
+                "involuccion_gerencia": "Directamente involucrada",  # → "Directamente involucrados"
+                "adaptacion_demanda": "Media",
+                "adaptacion_producto": "Alta",
+                "tiene_web": "Sí",
+                "ecommerce": "Sin tienda web propia",
+                "mercados_electronicos": "Con presencia pero sin ventas",
+                "redes_sociales": "Redes sociales activas y planificadas",
+            },
+            "confidence": _conf_95,
+        }
+    )
+
+    with patch("agents.extractor.run_claude", return_value=fake_response):
+        result = extract_dpi_fields(text)
+
+    # Normalización de facturación
+    assert result["selections"]["facturacion"] == "Menos de 200.000 €"
+    # Normalización de experiencia
+    assert result["selections"]["experiencia_internacional"] == "Ninguna"
+    # Normalización de involucción gerencia
+    assert result["selections"]["involuccion_gerencia"] == "Directamente involucrados"
+    # Deducción situacion_empresa desde año_inicio=2020 (6 años → "Más de 2 años")
+    assert result["selections"]["situacion_empresa"] == "Más de 2 años"
+    assert result["confidence"]["situacion_empresa"] >= 0.9
+
+    # Confidence alta para campos clave con dato explícito
+    for campo in ["num_empleados", "facturacion", "evolucion_facturacion", "tiene_web"]:
+        assert (
+            result["confidence"][campo] >= 0.8
+        ), f"{campo} confidence baja: {result['confidence'][campo]}"
+
+    # Con este fixture todos los criterios deben tener valor — máx 1 nulo aceptable
+    nulls = sum(1 for v in result["selections"].values() if v is None)
+    assert (
+        nulls <= 1
+    ), f"Demasiados campos sin deducir: {nulls} — {[k for k,v in result['selections'].items() if v is None]}"
+
+
 def test_approval_flow_generates_final_docx(tmp_path):
     """generate_final_docx should call render_template and update status to complete."""
     from agents.orchestrator import generate_final_docx

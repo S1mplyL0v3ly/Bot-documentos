@@ -35,7 +35,7 @@ CRITERION_QUESTIONS: dict[str, str] = {
     "redes_sociales": "¿Cuál es el nivel de actividad en redes sociales?\n   → Redes sociales inactivas o inexistentes / Redes sociales activas y planificadas / Redes sociales que generan ventas",
 }
 
-QUESTION_BATCH_SIZE = 6  # Max criteria per WhatsApp message
+QUESTION_BATCH_SIZE = 7  # Max criteria per WhatsApp message
 
 DRAFT_PROMPT = """Eres un experto en internacionalización empresarial. Basándote en el perfil DPI de la empresa, genera el análisis para el informe.
 
