@@ -233,4 +233,5 @@ def download_docx(doc_id: int, db: Session = Depends(get_db)):
         path=str(output_path),
         filename=output_path.name,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{output_path.name}"'},
     )

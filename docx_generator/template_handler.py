@@ -1,5 +1,10 @@
-"""DOCX template renderer for plantilla DPI Canarias."""
+"""DOCX template renderer for plantilla DPI Canarias.
 
+INVARIANT: templates/plantilla.docx is NEVER modified.
+render_template() always reads the original and writes a NEW file to outputs/.
+"""
+
+import re
 from pathlib import Path
 
 from docx import Document
@@ -161,12 +166,16 @@ def render_template(
     _apply_selections(doc, selections)
     _apply_free_texts_to_paragraphs(doc, free_texts)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    # Build output filename — template original is NEVER touched
+    empresa_clean = re.sub(r"[^\w\s-]", "", empresa_name).strip()
+    empresa_clean = re.sub(r"\s+", " ", empresa_clean)
+    filename = (
+        f"Reporte {empresa_clean}.docx"
+        if empresa_clean
+        else f"Reporte {document_id}.docx"
+    )
 
-    safe_name = "".join(c for c in empresa_name if c.isalnum() or c in " _-")[
-        :40
-    ].strip()
-    filename = f"informe_{safe_name or document_id}.docx"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / filename
     doc.save(str(output_path))
     return output_path
