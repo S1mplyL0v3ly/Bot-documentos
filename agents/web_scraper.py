@@ -181,7 +181,7 @@ def _build_dpi_from_web(url: str, html: str) -> dict:
     full_text = soup.get_text(" ", strip=True)
 
     # --- WEB confirmed ---
-    signals["selections"]["tiene_web"] = "Sí"
+    signals["selections"]["tiene_web"] = "Si"
     signals["confidence"]["tiene_web"] = 1.0
     signals["direct_fields"]["WEB"] = url
 
@@ -210,13 +210,17 @@ def _build_dpi_from_web(url: str, html: str) -> dict:
     # --- Ecommerce ---
     has_cart = bool(_ECOMMERCE_SIGNALS.search(html))
     if has_cart:
-        signals["selections"]["ecommerce"] = "Tienda web propia con ventas bajas"
+        signals["selections"][
+            "ecommerce"
+        ] = "Tienda web propia con ventas bajas o irregulares"
         signals["confidence"]["ecommerce"] = 0.7
 
     # --- Marketplaces ---
     found_marketplaces = [n for n, p in _MARKETPLACE_PATTERNS.items() if p.search(html)]
     if found_marketplaces:
-        signals["selections"]["mercados_electronicos"] = "Con presencia pero sin ventas"
+        signals["selections"][
+            "mercados_electronicos"
+        ] = "Con presencia en mercados electrónicos sin ventas o ventas bajas."
         signals["confidence"]["mercados_electronicos"] = 0.65
 
     # --- Alcance internacional (language selector = exports) ---
@@ -228,7 +232,35 @@ def _build_dpi_from_web(url: str, html: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 5. Main entry point
+# 5. CIF search via DuckDuckGo snippets (no anti-bot page loads)
+# ---------------------------------------------------------------------------
+
+
+def search_cif_ddg(company_name: str) -> Optional[str]:
+    """Search DuckDuckGo for '"{company_name}" CIF' and extract CIF from snippets.
+
+    Returns the CIF string (e.g. 'B12345678') or None if not found.
+    Never loads Einforma/Axesor pages — the CIF appears in result snippets.
+    """
+    try:
+        from duckduckgo_search import DDGS  # type: ignore
+
+        query = f'"{company_name}" CIF'
+        with DDGS() as ddgs:
+            for result in ddgs.text(query, max_results=8):
+                # Check both snippet body and title
+                for field in ("body", "title", "href"):
+                    text = result.get(field, "") or ""
+                    match = _CIF_PATTERN.search(text)
+                    if match:
+                        return match.group(1).upper()
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 6. Main entry point
 # ---------------------------------------------------------------------------
 
 
@@ -272,6 +304,13 @@ def find_best_candidate(
     dpi_signals: dict = {}
     if best_url and best_score >= _MIN_SCORE and best_html:
         dpi_signals = _build_dpi_from_web(best_url, best_html)
+
+    # CIF fallback: if not found in scraped HTML, try DDG snippet search
+    if not dpi_signals.get("direct_fields", {}).get("CIF"):
+        cif = search_cif_ddg(company_name)
+        if cif:
+            dpi_signals.setdefault("direct_fields", {})["CIF"] = cif
+            dpi_signals.setdefault("confidence", {})["CIF"] = 0.7
 
     return {
         "url": best_url if best_score >= _MIN_SCORE else None,

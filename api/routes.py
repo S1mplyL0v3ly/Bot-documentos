@@ -1,6 +1,7 @@
 """FastAPI route definitions."""
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import (
@@ -88,9 +89,17 @@ async def _bg_process_wa_document(
         )
         return
 
-    # CAMBIO 1: store cuestionario path, move to waiting_transcript
+    # CAMBIO 1: store cuestionario path + today's date, move to waiting_transcript
     crud.upsert_field(
         db, document_id, "_file_path", str(dest_path), confidence=1.0, source="system"
+    )
+    crud.upsert_field(
+        db,
+        document_id,
+        "dir_Reunion_Inicial",
+        datetime.now().strftime("%d/%m/%Y"),
+        confidence=1.0,
+        source="system",
     )
     crud.update_document_status(db, document_id, "waiting_transcript")
 
@@ -165,12 +174,12 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
     waiting_doc = crud.get_document_waiting_transcript(db, sender)
     if waiting_doc:
         fields = crud.get_fields(db, waiting_doc.id)
-        has_consultor = any(f.field_name == "nombre_consultor" for f in fields)
+        has_consultor = any(f.field_name == "dir_Nombre_realizador" for f in fields)
         if not has_consultor:
             crud.upsert_field(
                 db,
                 waiting_doc.id,
-                "nombre_consultor",
+                "dir_Nombre_realizador",
                 text,
                 confidence=1.0,
                 source="manual",

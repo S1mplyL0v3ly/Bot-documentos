@@ -57,39 +57,46 @@ DPI_SCORE_MAP: dict[str, dict[str, int]] = {
     },
     # BLOQUE INTERNACIONAL (35 pts)
     "experiencia_internacional": {
-        "Ninguna": 0,
+        "Ninguna experiencia": 0,
         "Menos de 3 años": 4,
         "Más de 5 años": 10,
     },
     "alcance_actividad": {"Insular": 1, "Nacional": 3, "Internacional": 6},
-    "evolucion_facturacion": {"En decrecimiento": 0, "Estable": 3, "En crecimiento": 6},
+    "evolucion_facturacion": {
+        "En decrecimiento": 0,
+        "Se mantiene estable": 3,
+        "En crecimiento": 6,
+    },
     "involuccion_gerencia": {
-        "Sin participación": 0,
+        "Sin participación alguna": 0,
         "Escasamente involucrados": 1,
         "Medianamente involucrados": 3,
         "Directamente involucrados": 5,
     },
     "adaptacion_demanda": {"Baja": 0, "Media": 2, "Alta": 4},
     "adaptacion_producto": {"Baja": 0, "Media": 1, "Alta": 2},
-    "num_paises": {"Ninguno": 0, "De 1 a 5": 1, "Más de 5": 2},
+    "num_paises": {
+        "Ninguno salvo el mercado nacional": 0,
+        "De 1 a 5": 1,
+        "Más de 5": 2,
+    },
     # BLOQUE DIGITALIZACIÓN (15 pts)
-    "tiene_web": {"No": 0, "Sí": 3},
+    "tiene_web": {"No": 0, "Si": 3},
     "ecommerce": {
-        "Sin tienda web propia": 1,
-        "Tienda web propia con ventas bajas": 2,
+        "Sin tienda web": 1,
+        "Tienda web propia con ventas bajas o irregulares": 2,
         "Tienda web propia con ventas regulares a nivel nacional": 4,
-        "Tienda web propia con ventas regulares a nivel internacional": 6,
+        "Tienda web propia con ventas internacionales": 6,
     },
     "mercados_electronicos": {
         "Sin presencia en mercados electrónicos": 0,
-        "Con presencia pero sin ventas": 1,
-        "Con ventas nacionales": 2,
-        "Con ventas internacionales": 4,
+        "Con presencia en mercados electrónicos sin ventas o ventas bajas.": 1,
+        "Con presencia en mercados electrónicos con ventas internacionales": 4,
     },
     "redes_sociales": {
-        "Redes sociales inactivas o inexistentes": 0,
+        "Redes sociales inactivas o con bajo uso": 0,
         "Redes sociales activas y planificadas": 1,
-        "Redes sociales que generan ventas": 2,
+        "Redes sociales activas y con generación de ventas": 2,
     },
 }
 
@@ -143,22 +150,22 @@ def generate_recommendations(selections: dict, score: dict) -> list[str]:
     """Devuelve lista de recomendaciones para criterios con puntuación baja."""
     _RECOS: dict[str, dict[str, str]] = {
         "experiencia_internacional": {
-            "Ninguna": "Sin exportaciones previas — priorizar mercados cercanos (Portugal, Francia)",
+            "Ninguna experiencia": "Sin exportaciones previas — priorizar mercados cercanos (Portugal, Francia)",
             "Menos de 3 años": "Exportaciones incipientes — consolidar un mercado piloto antes de diversificar",
         },
         "ecommerce": {
-            "Sin tienda web propia": "Sin tienda online — considerar Shopify o WooCommerce",
-            "Tienda web propia con ventas bajas": "Tienda con ventas bajas — optimizar SEO y experiencia de usuario",
+            "Sin tienda web": "Sin tienda online — considerar Shopify o WooCommerce",
+            "Tienda web propia con ventas bajas o irregulares": "Tienda con ventas bajas — optimizar SEO y experiencia de usuario",
         },
         "mercados_electronicos": {
             "Sin presencia en mercados electrónicos": "Sin presencia en marketplaces — explorar Etsy, Amazon Handmade",
-            "Con presencia pero sin ventas": "Presencia sin ventas — optimizar listings y política de precios",
+            "Con presencia en mercados electrónicos sin ventas o ventas bajas.": "Presencia sin ventas — optimizar listings y política de precios",
         },
         "redes_sociales": {
-            "Redes sociales inactivas o inexistentes": "Sin actividad social — crear perfil Instagram mínimo viable",
+            "Redes sociales inactivas o con bajo uso": "Sin actividad social — crear perfil Instagram mínimo viable",
         },
         "involuccion_gerencia": {
-            "Sin participación": "Gerencia sin implicación internacional — asignar responsable de exportación",
+            "Sin participación alguna": "Gerencia sin implicación internacional — asignar responsable de exportación",
             "Escasamente involucrados": "Implicación baja de gerencia — establecer objetivos internacionales concretos",
         },
     }
@@ -488,6 +495,26 @@ async def process_document(
                 confidence=0.9,
                 source="claude",
             )
+
+        # Compute VALOR_CONSTITUCION (seniority in years) from año_inicio
+        año_inicio_raw = extracted.get("direct_fields", {}).get("año_inicio")
+        if año_inicio_raw:
+            try:
+                from datetime import datetime as _dt
+
+                years_active = _dt.now().year - int(str(año_inicio_raw).strip())
+                if 0 <= years_active <= 200:
+                    valor = f"{years_active} año{'s' if years_active != 1 else ''}"
+                    crud.upsert_field(
+                        db,
+                        document_id,
+                        f"{PREFIX_DIRECT}VALOR_CONSTITUCION",
+                        valor,
+                        confidence=0.95,
+                        source="calculated",
+                    )
+            except (ValueError, TypeError):
+                pass
 
         # Persist selections with confidence
         confidence_map = extracted.get("confidence", {})

@@ -246,8 +246,21 @@ def render_template(
     direct_fields: dict[str, str] = {k: (v or "") for k, v in raw_direct.items()}
     if not any(k.lower() == "fecha" for k in raw_direct):
         direct_fields["fecha"] = datetime.now().strftime("%d/%m/%Y")
-    # CAMBIO 3: CIF/Cargo/WEB are optional — ensure they map to "" so {{placeholders}} clear
-    for optional_key in ("CIF", "Cargo", "WEB"):
+    # CAMBIO 3: optional fields — ensure they map to "" so {{placeholders}} clear
+    _OPTIONAL_FIELDS = (
+        "CIF",
+        "Cargo",
+        "WEB",
+        "Persona_Contacto",
+        "Telefono_Contacto",
+        "email",
+        "VALOR_CONSTITUCION",
+        "Reunion_Inicial",
+        "Nombre_realizador",
+        "sector",
+        "producto_servicio",
+    )
+    for optional_key in _OPTIONAL_FIELDS:
         if optional_key not in direct_fields:
             direct_fields[optional_key] = ""
 

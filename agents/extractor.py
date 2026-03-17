@@ -29,11 +29,11 @@ FACTURACION_MAP: dict[str, str] = {
 
 # MEJORA 2: Map free-form experiencia text → exact DPI option
 EXPERIENCIA_MAP: dict[str, str] = {
-    "no hemos exportado nunca": "Ninguna",
-    "ninguna experiencia": "Ninguna",
-    "nunca hemos exportado": "Ninguna",
-    "sin experiencia": "Ninguna",
-    "no exportamos": "Ninguna",
+    "no hemos exportado nunca": "Ninguna experiencia",
+    "ninguna experiencia": "Ninguna experiencia",
+    "nunca hemos exportado": "Ninguna experiencia",
+    "sin experiencia": "Ninguna experiencia",
+    "no exportamos": "Ninguna experiencia",
     "hemos exportado de forma puntual": "Menos de 3 años",
     "exportaciones puntuales": "Menos de 3 años",
     "ventas puntuales": "Menos de 3 años",
@@ -53,8 +53,8 @@ INVOLUCCION_MAP: dict[str, str] = {
     "medianamente implicad": "Medianamente involucrados",
     "escasamente involucrad": "Escasamente involucrados",
     "escasamente implicad": "Escasamente involucrados",
-    "sin participación": "Sin participación",
-    "no participa": "Sin participación",
+    "sin participación": "Sin participación alguna",
+    "no participa": "Sin participación alguna",
 }
 
 # MEJORA 7: Map free-form alcance text → exact DPI option
@@ -87,37 +87,44 @@ CRITERION_OPTIONS: dict[str, list[str]] = {
         "Entre 500.000 y 1.000.000 €",
         "Más de 1.000.000 €",
     ],
-    "evolucion_facturacion": ["En decrecimiento", "Estable", "En crecimiento"],
+    "evolucion_facturacion": [
+        "En decrecimiento",
+        "Se mantiene estable",
+        "En crecimiento",
+    ],
     "recursos_internacionalizacion": ["No", "Sí"],
-    "experiencia_internacional": ["Ninguna", "Menos de 3 años", "Más de 5 años"],
+    "experiencia_internacional": [
+        "Ninguna experiencia",
+        "Menos de 3 años",
+        "Más de 5 años",
+    ],
     "alcance_actividad": ["Insular", "Nacional", "Internacional"],
-    "num_paises": ["Ninguno", "De 1 a 5", "Más de 5"],
+    "num_paises": ["Ninguno salvo el mercado nacional", "De 1 a 5", "Más de 5"],
     "personal_dedicado": ["No", "Sí"],
     "involuccion_gerencia": [
-        "Sin participación",
+        "Sin participación alguna",
         "Escasamente involucrados",
         "Medianamente involucrados",
         "Directamente involucrados",
     ],
     "adaptacion_demanda": ["Baja", "Media", "Alta"],
     "adaptacion_producto": ["Baja", "Media", "Alta"],
-    "tiene_web": ["No", "Sí"],
+    "tiene_web": ["No", "Si"],
     "ecommerce": [
-        "Sin tienda web propia",
-        "Tienda web propia con ventas bajas",
+        "Sin tienda web",
+        "Tienda web propia con ventas bajas o irregulares",
         "Tienda web propia con ventas regulares a nivel nacional",
-        "Tienda web propia con ventas regulares a nivel internacional",
+        "Tienda web propia con ventas internacionales",
     ],
     "mercados_electronicos": [
         "Sin presencia en mercados electrónicos",
-        "Con presencia pero sin ventas",
-        "Con ventas nacionales",
-        "Con ventas internacionales",
+        "Con presencia en mercados electrónicos sin ventas o ventas bajas.",
+        "Con presencia en mercados electrónicos con ventas internacionales",
     ],
     "redes_sociales": [
-        "Redes sociales inactivas o inexistentes",
+        "Redes sociales inactivas o con bajo uso",
         "Redes sociales activas y planificadas",
-        "Redes sociales que generan ventas",
+        "Redes sociales activas y con generación de ventas",
     ],
 }
 
@@ -140,9 +147,9 @@ EJEMPLOS de lectura del cuestionario Canarias Expande:
 • "Implicación de la gerencia: La fundadora está Directamente involucrada..." → involuccion_gerencia = "Directamente involucrados"
 • "Grado de adaptación de la oferta a la demanda internacional: Media" → adaptacion_demanda = "Media"
 • "Grado de adaptación del producto al mercado internacional: Alta" → adaptacion_producto = "Alta"
-• "¿Dispone de página web corporativa? Sí tiene web..." → tiene_web = "Sí" (WEB = null si no da la URL)
-• "Tienda online: Sin tienda web propia actualmente" → ecommerce = "Sin tienda web propia"
-• "Presencia en mercados electrónicos: Con presencia pero sin ventas regulares" → mercados_electronicos = "Con presencia pero sin ventas"
+• "¿Dispone de página web corporativa? Sí tiene web..." → tiene_web = "Si" (WEB = null si no da la URL)
+• "Tienda online: Sin tienda web propia actualmente" → ecommerce = "Sin tienda web"
+• "Presencia en mercados electrónicos: Con presencia pero sin ventas regulares" → mercados_electronicos = "Con presencia en mercados electrónicos sin ventas o ventas bajas."
 • "Actividad en redes sociales: Redes sociales activas y planificadas" → redes_sociales = "Redes sociales activas y planificadas"
 
 GRUPO 1 — DATOS DIRECTOS (si aparecen en el documento):
@@ -162,19 +169,19 @@ GRUPO 2 — CRITERIOS DPI (elige la opción MÁS ADECUADA para cada criterio, o 
 situacion_empresa → opciones: "No constituida" | "Menos de 2 años" | "Más de 2 años"
 num_empleados → opciones: "Menos de 2" | "Más de 2"
 facturacion → opciones: "Menos de 200.000 €" | "Entre 200.000 y 500.000 €" | "Entre 500.000 y 1.000.000 €" | "Más de 1.000.000 €"
-evolucion_facturacion → opciones: "En decrecimiento" | "Estable" | "En crecimiento"
+evolucion_facturacion → opciones: "En decrecimiento" | "Se mantiene estable" | "En crecimiento"
 recursos_internacionalizacion → opciones: "No" | "Sí"
-experiencia_internacional → opciones: "Ninguna" | "Menos de 3 años" | "Más de 5 años"
+experiencia_internacional → opciones: "Ninguna experiencia" | "Menos de 3 años" | "Más de 5 años"
 alcance_actividad → opciones: "Insular" | "Nacional" | "Internacional"
-num_paises → opciones: "Ninguno" | "De 1 a 5" | "Más de 5"
+num_paises → opciones: "Ninguno salvo el mercado nacional" | "De 1 a 5" | "Más de 5"
 personal_dedicado → opciones: "No" | "Sí"
-involuccion_gerencia → opciones: "Sin participación" | "Escasamente involucrados" | "Medianamente involucrados" | "Directamente involucrados"
+involuccion_gerencia → opciones: "Sin participación alguna" | "Escasamente involucrados" | "Medianamente involucrados" | "Directamente involucrados"
 adaptacion_demanda → opciones: "Baja" | "Media" | "Alta"
 adaptacion_producto → opciones: "Baja" | "Media" | "Alta"
-tiene_web → opciones: "No" | "Sí"  (si hay WEB en datos directos O el documento indica que tienen web → "Sí"; WEB puede estar vacío)
-ecommerce → opciones: "Sin tienda web propia" | "Tienda web propia con ventas bajas" | "Tienda web propia con ventas regulares a nivel nacional" | "Tienda web propia con ventas regulares a nivel internacional"
-mercados_electronicos → opciones: "Sin presencia en mercados electrónicos" | "Con presencia pero sin ventas" | "Con ventas nacionales" | "Con ventas internacionales"
-redes_sociales → opciones: "Redes sociales inactivas o inexistentes" | "Redes sociales activas y planificadas" | "Redes sociales que generan ventas"
+tiene_web → opciones: "No" | "Si"  (si hay WEB en datos directos O el documento indica que tienen web → "Si"; WEB puede estar vacío)
+ecommerce → opciones: "Sin tienda web" | "Tienda web propia con ventas bajas o irregulares" | "Tienda web propia con ventas regulares a nivel nacional" | "Tienda web propia con ventas internacionales"
+mercados_electronicos → opciones: "Sin presencia en mercados electrónicos" | "Con presencia en mercados electrónicos sin ventas o ventas bajas." | "Con presencia en mercados electrónicos con ventas internacionales"
+redes_sociales → opciones: "Redes sociales inactivas o con bajo uso" | "Redes sociales activas y planificadas" | "Redes sociales activas y con generación de ventas"
 
 INSTRUCCIONES:
 - Las líneas que empiezan por ◉ o ☑ en la sección OPCIONES SELECCIONADAS son selecciones confirmadas
@@ -546,10 +553,10 @@ def _normalize_selections(data: dict, text: str) -> dict:
                 selections["situacion_empresa"] = inferred
                 confidence["situacion_empresa"] = conf
 
-    # MEJORA 5: WEB url present → tiene_web is "Sí" regardless
+    # MEJORA 5: WEB url present → tiene_web is "Si" regardless
     if direct.get("WEB"):
         if not selections.get("tiene_web"):
-            selections["tiene_web"] = "Sí"
+            selections["tiene_web"] = "Si"
             confidence["tiene_web"] = 1.0
 
     # MEJORA 7: normalize involuccion_gerencia
@@ -582,8 +589,8 @@ def _apply_logical_implications(data: dict) -> dict:
     confidence = data.get("confidence", {})
 
     exp = selections.get("experiencia_internacional")
-    if exp == "Ninguna" and not selections.get("num_paises"):
-        selections["num_paises"] = "Ninguno"
+    if exp == "Ninguna experiencia" and not selections.get("num_paises"):
+        selections["num_paises"] = "Ninguno salvo el mercado nacional"
         confidence["num_paises"] = 0.95
 
     alc = selections.get("alcance_actividad")

@@ -73,7 +73,7 @@ def test_extractor_returns_json_with_fields():
                 "involuccion_gerencia": None,
                 "adaptacion_demanda": None,
                 "adaptacion_producto": None,
-                "tiene_web": "Sí",
+                "tiene_web": "Si",
                 "ecommerce": None,
                 "mercados_electronicos": None,
                 "redes_sociales": None,
@@ -104,7 +104,7 @@ def test_extractor_returns_json_with_fields():
 
     assert result["direct_fields"]["Razon_Social"] == "Tech SL"
     assert result["selections"]["situacion_empresa"] == "Más de 2 años"
-    assert result["selections"]["tiene_web"] == "Sí"
+    assert result["selections"]["tiene_web"] == "Si"
     # Low confidence → nulled
     assert result["selections"]["evolucion_facturacion"] is None
     assert result["selections"]["personal_dedicado"] is None
@@ -426,16 +426,16 @@ def test_extractor_atelier_maria():
                 "facturacion": "Menos de 250.000 €",  # debe normalizarse → "Menos de 200.000 €"
                 "evolucion_facturacion": "En crecimiento",
                 "recursos_internacionalizacion": "Sí",
-                "experiencia_internacional": "No hemos exportado nunca",  # → "Ninguna"
+                "experiencia_internacional": "No hemos exportado nunca",  # → "Ninguna experiencia"
                 "alcance_actividad": "Nacional",
-                "num_paises": "Ninguno",
+                "num_paises": "Ninguno salvo el mercado nacional",
                 "personal_dedicado": "No",
                 "involuccion_gerencia": "Directamente involucrada",  # → "Directamente involucrados"
                 "adaptacion_demanda": "Media",
                 "adaptacion_producto": "Alta",
-                "tiene_web": "Sí",
-                "ecommerce": "Sin tienda web propia",
-                "mercados_electronicos": "Con presencia pero sin ventas",
+                "tiene_web": "Si",
+                "ecommerce": "Sin tienda web",
+                "mercados_electronicos": "Con presencia en mercados electrónicos sin ventas o ventas bajas.",
                 "redes_sociales": "Redes sociales activas y planificadas",
             },
             "confidence": _conf_95,
@@ -448,7 +448,7 @@ def test_extractor_atelier_maria():
     # Normalización de facturación
     assert result["selections"]["facturacion"] == "Menos de 200.000 €"
     # Normalización de experiencia
-    assert result["selections"]["experiencia_internacional"] == "Ninguna"
+    assert result["selections"]["experiencia_internacional"] == "Ninguna experiencia"
     # Normalización de involucción gerencia
     assert result["selections"]["involuccion_gerencia"] == "Directamente involucrados"
     # Deducción situacion_empresa desde año_inicio=2020 (6 años → "Más de 2 años")
@@ -510,24 +510,24 @@ def test_calculate_dpi_score_atelier_maria():
         "num_empleados": "Más de 2",
         "facturacion": "Menos de 200.000 €",
         "evolucion_facturacion": "En crecimiento",
-        "experiencia_internacional": "Ninguna",
+        "experiencia_internacional": "Ninguna experiencia",
         "alcance_actividad": "Nacional",
-        "num_paises": "Ninguno",
+        "num_paises": "Ninguno salvo el mercado nacional",
         "involuccion_gerencia": "Directamente involucrados",
         "adaptacion_demanda": "Media",
         "adaptacion_producto": "Alta",
-        "tiene_web": "Sí",
-        "ecommerce": "Sin tienda web propia",
-        "mercados_electronicos": "Con presencia pero sin ventas",
+        "tiene_web": "Si",
+        "ecommerce": "Sin tienda web",
+        "mercados_electronicos": "Con presencia en mercados electrónicos sin ventas o ventas bajas.",
         "redes_sociales": "Redes sociales activas y planificadas",
     }
     score = calculate_dpi_score(selections)
 
     # Económico: 5 (Más de 2 años) + 5 (Más de 2) + 1 (Menos de 200.000 €) = 11
     assert score["scores"]["Económico"] == 11
-    # Internacional: 0 (Ninguna) + 3 (Nacional) + 6 (En crecimiento) + 5 (Directamente) + 2 (Media) + 2 (Alta) + 0 (Ninguno) = 18
+    # Internacional: 0 (Ninguna experiencia) + 3 (Nacional) + 6 (En crecimiento) + 5 (Directamente) + 2 (Media) + 2 (Alta) + 0 (Ninguno) = 18
     assert score["scores"]["Internacional"] == 18
-    # Digitalización: 3 (Sí) + 1 (Sin tienda) + 1 (Con presencia sin ventas) + 1 (Activas y planificadas) = 6
+    # Digitalización: 3 (Si) + 1 (Sin tienda) + 1 (Con presencia sin ventas) + 1 (Activas y planificadas) = 6
     assert score["scores"]["Digitalización"] == 6
     assert score["total"] == 35
     assert score["max_total"] == 65
@@ -580,15 +580,18 @@ def test_boost_visual_confidence_recursos_no_programs_selected():
 
 
 def test_apply_logical_implications_ninguna_exports():
-    """experiencia_internacional=Ninguna debe implicar num_paises=Ninguno."""
+    """experiencia_internacional=Ninguna experiencia debe implicar num_paises=Ninguno salvo el mercado nacional."""
     from agents.extractor import _apply_logical_implications
 
     data = {
-        "selections": {"experiencia_internacional": "Ninguna", "num_paises": None},
+        "selections": {
+            "experiencia_internacional": "Ninguna experiencia",
+            "num_paises": None,
+        },
         "confidence": {"experiencia_internacional": 1.0, "num_paises": 0.0},
     }
     result = _apply_logical_implications(data)
-    assert result["selections"]["num_paises"] == "Ninguno"
+    assert result["selections"]["num_paises"] == "Ninguno salvo el mercado nacional"
     assert result["confidence"]["num_paises"] == 0.95
 
 
@@ -611,7 +614,7 @@ def test_apply_logical_implications_does_not_overwrite():
 
     data = {
         "selections": {
-            "experiencia_internacional": "Ninguna",
+            "experiencia_internacional": "Ninguna experiencia",
             "num_paises": "De 1 a 5",
         },
         "confidence": {"experiencia_internacional": 1.0, "num_paises": 0.9},
@@ -659,7 +662,7 @@ def test_build_dpi_from_web_detects_social_and_ecommerce():
         "</body></html>"
     )
     signals = _build_dpi_from_web("https://atelier-maria.com", html)
-    assert signals["selections"].get("tiene_web") == "Sí"
+    assert signals["selections"].get("tiene_web") == "Si"
     assert (
         signals["selections"].get("redes_sociales")
         == "Redes sociales activas y planificadas"
@@ -724,3 +727,92 @@ def test_read_google_forms_pdf_atelier_maria():
     assert any(
         s.strip() == "Sí" for s in selected
     ), f"Página web no detectada. Seleccionados: {selected}"
+
+
+# ─── CIF DDG search ──────────────────────────────────────────────────────────
+
+
+def test_search_cif_ddg_extracts_from_snippet():
+    """search_cif_ddg returns CIF found in DuckDuckGo result body/title (mocked)."""
+    from agents.web_scraper import search_cif_ddg
+
+    fake_results = [
+        {
+            "body": "Atelier Maria Secretos SL CIF B76543210 - Joyería en Las Palmas",
+            "title": "",
+            "href": "",
+        },
+        {
+            "body": "Otro resultado sin CIF",
+            "title": "página sin CIF",
+            "href": "https://example.com",
+        },
+    ]
+
+    class FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def text(self, query, max_results=8):
+            return iter(fake_results)
+
+    with patch("agents.web_scraper.DDGS", FakeDDGS, create=True):
+        # Patch the import inside the function
+        import agents.web_scraper as ws_module
+        import sys
+
+        fake_mod = MagicMock()
+        fake_mod.DDGS = FakeDDGS
+        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+            result = search_cif_ddg("Atelier Maria Secretos")
+
+    assert result == "B76543210"
+
+
+def test_search_cif_ddg_returns_none_when_not_found():
+    """search_cif_ddg returns None when no CIF appears in snippets."""
+    from agents.web_scraper import search_cif_ddg
+
+    fake_results = [
+        {
+            "body": "Empresa sin datos fiscales",
+            "title": "Sin CIF",
+            "href": "https://example.com",
+        },
+    ]
+
+    class FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def text(self, query, max_results=8):
+            return iter(fake_results)
+
+    import sys
+
+    fake_mod = MagicMock()
+    fake_mod.DDGS = FakeDDGS
+    with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+        result = search_cif_ddg("Empresa Inexistente SL")
+
+    assert result is None
+
+
+def test_search_cif_ddg_returns_none_on_exception():
+    """search_cif_ddg returns None silently when DDGS raises."""
+    from agents.web_scraper import search_cif_ddg
+
+    import sys
+
+    fake_mod = MagicMock()
+    fake_mod.DDGS.side_effect = RuntimeError("network error")
+    with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+        result = search_cif_ddg("Any Company")
+
+    assert result is None
