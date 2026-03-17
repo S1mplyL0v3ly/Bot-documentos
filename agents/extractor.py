@@ -177,6 +177,9 @@ mercados_electronicos → opciones: "Sin presencia en mercados electrónicos" | 
 redes_sociales → opciones: "Redes sociales inactivas o inexistentes" | "Redes sociales activas y planificadas" | "Redes sociales que generan ventas"
 
 INSTRUCCIONES:
+- Las líneas que empiezan por ◉ o ☑ en la sección OPCIONES SELECCIONADAS son selecciones confirmadas
+  visualmente. Para esas opciones, usa confianza = 0.95 aunque la opción del formulario no coincida
+  exactamente con las opciones DPI listadas (aproxima al rango más cercano con confianza 0.95).
 - Si el documento es un cuestionario con respuestas explícitas, usa confianza ≥ 0.95 para esas respuestas.
 - Usa null si la información no aparece o no es suficiente para elegir con confianza ≥ 0.7.
 - La confianza refleja qué tan seguro estás: 0.0 = adivinanza, 1.0 = dato explícito en el documento.
@@ -405,6 +408,55 @@ def _apply_value_map(value: str, mapping: dict[str, str]) -> str:
     return value
 
 
+def _boost_visual_confidence(data: dict, cuestionario_text: str) -> dict:
+    """MEJORA 8: Fill selections and set confidence=1.0 for values from visual detections.
+
+    Visual selections (◉/☑ markers in '=== OPCIONES SELECCIONADAS ===') are 100%
+    reliable. Claude may return low confidence when cuestionario options don't exactly
+    match DPI options (e.g. 'Menos de 250.000 €' vs 'Menos de 200.000 €'). This
+    step applies normalization maps directly to the visual section, bypassing the
+    confidence threshold for confirmed visual detections.
+
+    Called AFTER _normalize_selections and BEFORE _null_low_confidence.
+    """
+    if "=== OPCIONES SELECCIONADAS" not in cuestionario_text:
+        return data
+
+    start = cuestionario_text.index("=== OPCIONES SELECCIONADAS")
+    end = (
+        cuestionario_text.index("=== TEXTO COMPLETO")
+        if "=== TEXTO COMPLETO" in cuestionario_text
+        else len(cuestionario_text)
+    )
+    visual_lower = cuestionario_text[start:end].lower()
+
+    selections = data.get("selections", {})
+    confidence = data.get("confidence", {})
+
+    # (normalization_map, criterion_key) — first matching key wins per criterion
+    visual_maps = [
+        (FACTURACION_MAP, "facturacion"),
+        (EXPERIENCIA_MAP, "experiencia_internacional"),
+        (INVOLUCCION_MAP, "involuccion_gerencia"),
+        (ALCANCE_MAP, "alcance_actividad"),
+    ]
+    for map_dict, key in visual_maps:
+        for pattern, value in map_dict.items():
+            if pattern in visual_lower:
+                if not selections.get(key):
+                    # Claude returned null — fill from visual detection
+                    selections[key] = value
+                    confidence[key] = 1.0
+                elif selections.get(key) == value:
+                    # Claude returned correct value but low confidence — boost it
+                    confidence[key] = 1.0
+                break  # first match wins per criterion
+
+    data["selections"] = selections
+    data["confidence"] = confidence
+    return data
+
+
 # MEJORA 3: Patterns to extract year of incorporation from document text
 _YEAR_PATTERNS = [
     r"año de inicio de (?:la )?actividad[^:\n]*[:\s]+(\d{4})",
@@ -522,4 +574,5 @@ def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dic
         }
 
     data = _normalize_selections(data, combined)
+    data = _boost_visual_confidence(data, cuestionario_text)  # MEJORA 8
     return _null_low_confidence(data)
