@@ -940,3 +940,29 @@ def test_template_green_cells_and_no_valorar():
 
     # Cleanup
     output_path.unlink(missing_ok=True)
+
+
+def test_extract_relevant_sections_long_doc():
+    """Long document: DPI-relevant lines are preserved even when far from start."""
+    from agents.extractor import extract_relevant_sections
+
+    irrelevant = "texto irrelevante sin ninguna palabra clave\n" * 500
+    relevant_a = "La empresa tiene 5 empleados fijos a tiempo completo\n"
+    irrelevant2 = "texto irrelevante sin ninguna palabra clave\n" * 500
+    relevant_b = "Facturación estable durante los últimos tres años\n"
+    long_text = irrelevant + relevant_a + irrelevant2 + relevant_b
+
+    result = extract_relevant_sections(long_text, max_chars=5000)
+
+    assert "5 empleados" in result
+    assert "Facturación estable" in result
+    assert len(result) <= 5000
+
+
+def test_extract_relevant_sections_short_doc():
+    """Short document: returned unchanged (no extraction needed)."""
+    from agents.extractor import extract_relevant_sections
+
+    short_text = "texto corto\n" * 10
+    result = extract_relevant_sections(short_text, max_chars=15000)
+    assert result == short_text

@@ -637,20 +637,121 @@ def _apply_logical_implications(data: dict) -> dict:
     return data
 
 
+_DPI_KEYWORDS = [
+    # Económico
+    "facturación",
+    "facturacion",
+    "empleados",
+    "trabajadores",
+    "ingresos",
+    "ventas",
+    "crecimiento",
+    "estable",
+    "decrecimiento",
+    "recursos",
+    "inversión",
+    "capital",
+    # Internacionalización
+    "exportación",
+    "exportacion",
+    "internacional",
+    "países",
+    "paises",
+    "mercados",
+    "experiencia",
+    "gerente",
+    "propietario",
+    "involucrado",
+    "personal dedicado",
+    "departamento",
+    # Adaptación
+    "adaptación",
+    "adaptacion",
+    "demanda",
+    "producto",
+    "servicio",
+    "personalizado",
+    "personalizada",
+    "encargo",
+    # Digitalización
+    "web",
+    "página",
+    "pagina",
+    "tienda",
+    "online",
+    "ecommerce",
+    "amazon",
+    "etsy",
+    "marketplace",
+    "instagram",
+    "facebook",
+    "redes sociales",
+    "tiktok",
+]
+
+
+def extract_relevant_sections(text: str, max_chars: int = 15000) -> str:
+    """Return the most DPI-relevant portions of a long document.
+
+    Instead of blindly truncating, this function:
+    1. Returns the full text when it fits within max_chars.
+    2. For longer documents, scores each line by how many DPI keywords it
+       contains, then selects matching lines plus ±2 lines of context.
+    3. Always includes the first 30 lines (header / identification data).
+    4. Truncates the result to max_chars as a final safety net.
+
+    Args:
+        text: Full document text (cuestionario or transcript).
+        max_chars: Maximum characters to return (default 15 000).
+
+    Returns:
+        Filtered text with DPI-relevant sections preserved.
+    """
+    if len(text) <= max_chars:
+        return text
+
+    lines = text.split("\n")
+    scored: list[tuple[int, int]] = []
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        score = sum(1 for kw in _DPI_KEYWORDS if kw in line_lower)
+        scored.append((i, score))
+
+    selected: set[int] = set()
+    # Always include header
+    for j in range(min(30, len(lines))):
+        selected.add(j)
+    # Include relevant lines with ±2-line context
+    for i, score in scored:
+        if score > 0:
+            for j in range(max(0, i - 2), min(len(lines), i + 3)):
+                selected.add(j)
+
+    result = "\n".join(lines[i] for i in sorted(selected))
+    if len(result) > max_chars:
+        result = result[:max_chars]
+    return result
+
+
 def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dict:
     """Extract DPI fields and selections from document text using Claude.
 
     Args:
-        cuestionario_text: Raw text from the cuestionario PDF (up to 15000 chars).
-        transcript_text: Optional transcript text from interview PDF (up to 5000 chars).
+        cuestionario_text: Raw text from the cuestionario PDF.
+        transcript_text: Optional transcript text from interview PDF.
 
     Returns:
         dict with keys: direct_fields, selections, confidence
         Selections with confidence < 0.7 are set to null.
     """
-    combined = f"=== CUESTIONARIO ===\n{cuestionario_text[:15000]}"
+    combined = (
+        f"=== CUESTIONARIO ===\n{extract_relevant_sections(cuestionario_text, 15000)}"
+    )
     if transcript_text:
-        combined += f"\n\n=== TRANSCRIPCIÓN ENTREVISTA ===\n{transcript_text[:5000]}"
+        combined += (
+            f"\n\n=== TRANSCRIPCIÓN ENTREVISTA ===\n"
+            f"{extract_relevant_sections(transcript_text, 5000)}"
+        )
     prompt = EXTRACTOR_PROMPT.format(text=combined)
     raw = run_claude(prompt)
     data = _parse_json_response(raw)
