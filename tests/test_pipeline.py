@@ -555,6 +555,51 @@ def test_two_document_flow():
     assert result.status == "waiting_transcript"
 
 
+# ─── Logical implications ─────────────────────────────────────────────────────
+
+
+def test_apply_logical_implications_ninguna_exports():
+    """experiencia_internacional=Ninguna debe implicar num_paises=Ninguno."""
+    from agents.extractor import _apply_logical_implications
+
+    data = {
+        "selections": {"experiencia_internacional": "Ninguna", "num_paises": None},
+        "confidence": {"experiencia_internacional": 1.0, "num_paises": 0.0},
+    }
+    result = _apply_logical_implications(data)
+    assert result["selections"]["num_paises"] == "Ninguno"
+    assert result["confidence"]["num_paises"] == 0.95
+
+
+def test_apply_logical_implications_internacional_implies_countries():
+    """alcance_actividad=Internacional debe implicar num_paises=De 1 a 5 cuando null."""
+    from agents.extractor import _apply_logical_implications
+
+    data = {
+        "selections": {"alcance_actividad": "Internacional", "num_paises": None},
+        "confidence": {"alcance_actividad": 0.9, "num_paises": 0.0},
+    }
+    result = _apply_logical_implications(data)
+    assert result["selections"]["num_paises"] == "De 1 a 5"
+    assert result["confidence"]["num_paises"] >= 0.7
+
+
+def test_apply_logical_implications_does_not_overwrite():
+    """Si num_paises ya tiene valor, no se sobreescribe."""
+    from agents.extractor import _apply_logical_implications
+
+    data = {
+        "selections": {
+            "experiencia_internacional": "Ninguna",
+            "num_paises": "De 1 a 5",
+        },
+        "confidence": {"experiencia_internacional": 1.0, "num_paises": 0.9},
+    }
+    result = _apply_logical_implications(data)
+    # Should not overwrite existing value
+    assert result["selections"]["num_paises"] == "De 1 a 5"
+
+
 # ─── Visual PDF detection ─────────────────────────────────────────────────────
 
 

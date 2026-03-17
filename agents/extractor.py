@@ -548,6 +548,35 @@ def _normalize_selections(data: dict, text: str) -> dict:
     return data
 
 
+def _apply_logical_implications(data: dict) -> dict:
+    """MEJORA 9: Infer additional criteria from already-confirmed selections.
+
+    Deterministic logical rules derived from DPI semantics:
+    - experiencia_internacional = "Ninguna"  →  num_paises = "Ninguno"
+      (company has never exported → cannot be selling in any foreign countries)
+    - alcance_actividad = "Internacional"  →  num_paises ≥ "De 1 a 5" when still null
+      (selling internationally means at least 1 country)
+
+    Called AFTER _boost_visual_confidence and BEFORE _null_low_confidence.
+    """
+    selections = data.get("selections", {})
+    confidence = data.get("confidence", {})
+
+    exp = selections.get("experiencia_internacional")
+    if exp == "Ninguna" and not selections.get("num_paises"):
+        selections["num_paises"] = "Ninguno"
+        confidence["num_paises"] = 0.95
+
+    alc = selections.get("alcance_actividad")
+    if alc == "Internacional" and not selections.get("num_paises"):
+        selections["num_paises"] = "De 1 a 5"
+        confidence["num_paises"] = 0.75
+
+    data["selections"] = selections
+    data["confidence"] = confidence
+    return data
+
+
 def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dict:
     """Extract DPI fields and selections from document text using Claude.
 
@@ -575,4 +604,5 @@ def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dic
 
     data = _normalize_selections(data, combined)
     data = _boost_visual_confidence(data, cuestionario_text)  # MEJORA 8
+    data = _apply_logical_implications(data)  # MEJORA 9
     return _null_low_confidence(data)
