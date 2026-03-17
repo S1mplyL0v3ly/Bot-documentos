@@ -558,6 +558,27 @@ def test_two_document_flow():
 # ─── Logical implications ─────────────────────────────────────────────────────
 
 
+def test_boost_visual_confidence_recursos_no_programs_selected():
+    """Si la pregunta de programas existe en el cuestionario pero ninguno seleccionado → recursos=No."""
+    from agents.extractor import _boost_visual_confidence
+
+    cuestionario_text = (
+        "=== OPCIONES SELECCIONADAS EN EL FORMULARIO ===\n"
+        "◉ No hemos exportado nunca\n"
+        "◉ Directamente involucrados\n"
+        "\n=== TEXTO COMPLETO DEL FORMULARIO ===\n"
+        "¿Ha participado su empresa en algún programa de apoyo a la internacionalización?\n"
+        "Canarias Aporta\nICEX NEXT\nICEX APIEm\nMisiones Comerciales\nRed EEN\n"
+    )
+    data = {
+        "selections": {"recursos_internacionalizacion": None},
+        "confidence": {"recursos_internacionalizacion": 0.0},
+    }
+    result = _boost_visual_confidence(data, cuestionario_text)
+    assert result["selections"]["recursos_internacionalizacion"] == "No"
+    assert result["confidence"]["recursos_internacionalizacion"] >= 0.8
+
+
 def test_apply_logical_implications_ninguna_exports():
     """experiencia_internacional=Ninguna debe implicar num_paises=Ninguno."""
     from agents.extractor import _apply_logical_implications

@@ -452,6 +452,25 @@ def _boost_visual_confidence(data: dict, cuestionario_text: str) -> dict:
                     confidence[key] = 1.0
                 break  # first match wins per criterion
 
+    # recursos_internacionalizacion: cuestionario asks "¿Ha participado en programas anteriores?"
+    # If the program names appear in the full text but NONE appear in visual selections
+    # (visual_lower = selected items only) → the question was shown but nothing was ticked = "No"
+    _PROGRAMAS_KEYWORDS = {
+        "canarias aporta",
+        "icex next",
+        "icex apiem",
+        "misiones comerciales",
+        "red een",
+        "asistencias técnicas",
+    }
+    full_text_lower = cuestionario_text.lower()
+    if not selections.get("recursos_internacionalizacion"):
+        question_present = any(kw in full_text_lower for kw in _PROGRAMAS_KEYWORDS)
+        any_program_selected = any(kw in visual_lower for kw in _PROGRAMAS_KEYWORDS)
+        if question_present and not any_program_selected:
+            selections["recursos_internacionalizacion"] = "No"
+            confidence["recursos_internacionalizacion"] = 0.85
+
     data["selections"] = selections
     data["confidence"] = confidence
     return data
