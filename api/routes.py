@@ -156,7 +156,9 @@ async def _bg_process_wa_transcript(
     )
     status = result.get("status")
 
-    if status == "waiting_user_response":
+    if status in ("waiting_web_confirmation", "waiting_web_url"):
+        await send_text(sender, result["question_message"])
+    elif status == "waiting_user_response":
         await send_text(sender, result["question_message"])
     elif status == "waiting_approval":
         await send_text(sender, result["draft_message"])
