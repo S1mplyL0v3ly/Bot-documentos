@@ -4,7 +4,7 @@ import json
 import re
 import sqlite3
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -220,7 +220,7 @@ def _log_to_jarvis(success: bool, document_id: int, notes: str = "") -> None:
                     "autoreporte",
                     f"process_document:{document_id}",
                     1 if success else 0,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                     notes,
                 ),
             )
