@@ -666,46 +666,70 @@ async def process_user_response(db: Session, document_id: int, text: str) -> dic
     null_criteria = [
         f.field_name[len(PREFIX_SELECTION) :]
         for f in fields
-        if f.field_name.startswith(PREFIX_SELECTION) and f.field_value is None
+        if f.field_name.startswith(PREFIX_SELECTION) and not f.field_value
     ]
 
     if not null_criteria:
         return await generate_draft_texts(db, document_id)
 
-    # Parse numbered answers ("1. answer", "1) answer", "• 1. answer")
+    # Parse numbered answers — extract leading digit from each non-empty line.
+    # Handles all user formats:
+    #   "2"  /  "2. Estable"  /  "2) Estable"  /  "2  (Estable)"  /  "1️⃣ ..."
     lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
-    answers: list[str] = []
+    number_per_line: list[int] = []
     for line in lines:
-        match = re.match(r"^[•\-]?\s*\d+[.)]\s*(.+)$", line)
-        if match:
-            answers.append(match.group(1).strip())
+        # Strip leading emoji digits (1️⃣ → keep looking) and try plain digit
+        m = re.match(r"^\s*(\d+)", line)
+        if m:
+            number_per_line.append(int(m.group(1)))
 
-    # Fallback: single answer for a single pending question
-    if not answers and len(null_criteria) == 1:
-        answers = [text.strip()]
-
-    for i, criterion in enumerate(null_criteria):
-        if i >= len(answers):
-            break
-        raw_answer = answers[i]
-        options = CRITERION_OPTIONS.get(criterion, [])
+    # Fallback: whole text as a single answer for a single pending question
+    if not number_per_line and len(null_criteria) == 1:
+        options = CRITERION_OPTIONS.get(null_criteria[0], [])
+        raw = text.strip()
         matched = next(
             (
-                opt
-                for opt in options
-                if opt.lower() in raw_answer.lower()
-                or raw_answer.lower() in opt.lower()
+                o
+                for o in options
+                if o.lower() in raw.lower() or raw.lower() in o.lower()
             ),
-            raw_answer,
+            raw,
         )
         crud.upsert_field(
             db,
             document_id,
-            f"{PREFIX_SELECTION}{criterion}",
+            f"{PREFIX_SELECTION}{null_criteria[0]}",
             matched,
             confidence=1.0,
             source="whatsapp",
         )
+    else:
+        for i, criterion in enumerate(null_criteria[: len(number_per_line)]):
+            num = number_per_line[i]
+            options = CRITERION_OPTIONS.get(criterion, [])
+            if 1 <= num <= len(options):
+                matched = options[num - 1]  # 1-indexed
+            else:
+                # Number out of range — try text match as last resort
+                raw = lines[i] if i < len(lines) else ""
+                matched = next(
+                    (
+                        o
+                        for o in options
+                        if o.lower() in raw.lower() or raw.lower() in o.lower()
+                    ),
+                    None,
+                )
+                if not matched:
+                    continue
+            crud.upsert_field(
+                db,
+                document_id,
+                f"{PREFIX_SELECTION}{criterion}",
+                matched,
+                confidence=1.0,
+                source="whatsapp",
+            )
 
     remaining = generate_questions(db, document_id)
     if remaining:
