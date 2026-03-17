@@ -478,6 +478,23 @@ def _boost_visual_confidence(data: dict, cuestionario_text: str) -> dict:
             selections["recursos_internacionalizacion"] = "No"
             confidence["recursos_internacionalizacion"] = 0.85
 
+    # tiene_web: bare "◉ Sí" in visual selections + web question in full text → "Si"
+    # Bare "Sí" means the line ends right after (vs "Sí, me gustaría recibir...")
+    _WEB_QUESTION_KEYWORDS = {
+        "página web",
+        "web corporativa",
+        "dispone de web",
+        "sitio web",
+    }
+    if not selections.get("tiene_web"):
+        bare_si = bool(re.search(r"◉ s[ií]\s*\n", visual_lower))
+        web_question_present = any(
+            kw in full_text_lower for kw in _WEB_QUESTION_KEYWORDS
+        )
+        if bare_si and web_question_present:
+            selections["tiene_web"] = "Si"
+            confidence["tiene_web"] = 0.9
+
     data["selections"] = selections
     data["confidence"] = confidence
     return data

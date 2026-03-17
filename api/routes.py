@@ -108,7 +108,8 @@ async def _bg_process_wa_document(
         "📄 *Cuestionario recibido.*\n\n"
         "Para continuar, dime:\n"
         "*¿Cuál es el nombre del consultor y la fecha de la reunión?*\n\n"
-        "_Ej: María González, 15/03/2025_",
+        "_Ej: María González, 15/03/2025_\n\n"
+        "_(En el siguiente paso te pediré el cargo de la persona de contacto)_",
     )
 
 
@@ -170,11 +171,12 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
 
     text_lower = text.lower().strip()
 
-    # CAMBIO 4: nombre consultor + fecha reunión (doc waiting for transcript)
+    # CAMBIO 4: nombre consultor + cargo + fecha reunión (doc waiting for transcript)
     waiting_doc = crud.get_document_waiting_transcript(db, sender)
     if waiting_doc:
         fields = crud.get_fields(db, waiting_doc.id)
         has_consultor = any(f.field_name == "dir_Nombre_realizador" for f in fields)
+        has_cargo = any(f.field_name == "dir_Cargo" for f in fields)
         if not has_consultor:
             crud.upsert_field(
                 db,
@@ -186,7 +188,23 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
             )
             await send_text(
                 sender,
-                "✅ *Datos guardados.*\n\n"
+                "✅ *Guardado.*\n\n"
+                "*¿Cuál es el cargo de la persona de contacto?*\n\n"
+                "_Ej: Gerente / Director Comercial / Autónomo/a_",
+            )
+            return
+        if not has_cargo:
+            crud.upsert_field(
+                db,
+                waiting_doc.id,
+                "dir_Cargo",
+                text,
+                confidence=1.0,
+                source="manual",
+            )
+            await send_text(
+                sender,
+                "✅ *Guardado.*\n\n"
                 "Ahora envíame la *transcripción de la entrevista* en PDF.",
             )
             return

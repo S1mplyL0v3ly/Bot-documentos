@@ -579,6 +579,45 @@ def test_boost_visual_confidence_recursos_no_programs_selected():
     assert result["confidence"]["recursos_internacionalizacion"] >= 0.8
 
 
+def test_boost_visual_confidence_tiene_web_bare_si():
+    """◉ Sí (bare line) + "página web" en texto → tiene_web = "Si"."""
+    from agents.extractor import _boost_visual_confidence
+
+    cuestionario_text = (
+        "=== OPCIONES SELECCIONADAS EN EL FORMULARIO ===\n"
+        "◉ Sí\n"
+        "◉ Sí, me gustaría recibir dicha información.\n"
+        "\n=== TEXTO COMPLETO DEL FORMULARIO ===\n"
+        "¿Dispone la empresa de página web corporativa?\n"
+        "Sí  No\n"
+    )
+    data = {
+        "selections": {"tiene_web": None},
+        "confidence": {"tiene_web": 0.0},
+    }
+    result = _boost_visual_confidence(data, cuestionario_text)
+    assert result["selections"]["tiene_web"] == "Si"
+    assert result["confidence"]["tiene_web"] >= 0.85
+
+
+def test_boost_visual_confidence_tiene_web_not_triggered_without_keyword():
+    """◉ Sí sin keyword de página web en el texto → tiene_web permanece null."""
+    from agents.extractor import _boost_visual_confidence
+
+    cuestionario_text = (
+        "=== OPCIONES SELECCIONADAS EN EL FORMULARIO ===\n"
+        "◉ Sí\n"
+        "\n=== TEXTO COMPLETO DEL FORMULARIO ===\n"
+        "¿Le gustaría recibir información sobre ayudas?\n"
+    )
+    data = {
+        "selections": {"tiene_web": None},
+        "confidence": {"tiene_web": 0.0},
+    }
+    result = _boost_visual_confidence(data, cuestionario_text)
+    assert result["selections"]["tiene_web"] is None
+
+
 def test_apply_logical_implications_ninguna_exports():
     """experiencia_internacional=Ninguna experiencia debe implicar num_paises=Ninguno salvo el mercado nacional."""
     from agents.extractor import _apply_logical_implications
