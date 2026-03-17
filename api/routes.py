@@ -207,9 +207,46 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
             await send_text(
                 sender,
                 "✅ *Guardado.*\n\n"
-                "Ahora envíame la *transcripción de la entrevista* en PDF.",
+                "Ahora envíame la *transcripción de la entrevista* en PDF.\n"
+                "_También puedes escribirla directamente aquí como texto._",
             )
             return
+
+        # Consultor + cargo ya guardados → usuario envía transcript como texto libre
+        fields_map = crud.get_fields(db, waiting_doc.id)
+        cuestionario_path_str = next(
+            (f.field_value for f in fields_map if f.field_name == "_file_path"), None
+        )
+        if not cuestionario_path_str:
+            await send_text(
+                sender, "Error interno: no encontré el cuestionario original."
+            )
+            return
+
+        crud.save_transcript_text(db, waiting_doc.id, text)
+        crud.update_document_status(db, waiting_doc.id, "processing")
+        await send_text(
+            sender,
+            "⏳ *Procesando documentos con IA...*\n"
+            "El proceso tarda aproximadamente *2-3 minutos*. 🔄",
+        )
+        await asyncio.sleep(2)
+
+        result = await process_document(
+            db, waiting_doc.id, Path(cuestionario_path_str), transcript_text=text
+        )
+        status = result.get("status")
+        if status in ("waiting_web_confirmation", "waiting_web_url"):
+            await send_text(sender, result["question_message"])
+        elif status == "waiting_user_response":
+            await send_text(sender, result["question_message"])
+        elif status == "waiting_approval":
+            await send_text(sender, result["draft_message"])
+        elif status == "error":
+            await send_text(
+                sender, "Error procesando los documentos. Inténtalo de nuevo."
+            )
+        return
 
     # Web confirmation — waiting_web_confirmation or waiting_web_url
     for web_status in ("waiting_web_confirmation", "waiting_web_url"):
