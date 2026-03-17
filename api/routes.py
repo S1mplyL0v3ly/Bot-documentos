@@ -42,7 +42,31 @@ _MIME_TO_EXT: dict[str, str] = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
 }
 
+# Deduplication: track WhatsApp message IDs already dispatched to background tasks.
+# Prevents double-processing when Meta delivers the same webhook twice.
+_seen_msg_ids: set[str] = set()
+_MAX_SEEN = 2000  # cap to avoid unbounded growth
+
 router = APIRouter()
+
+
+def _make_db():
+    """Create a fresh SQLAlchemy session for background tasks.
+
+    Background tasks outlive the request context, so they must NOT reuse the
+    request-scoped session from Depends(get_db) — that session is closed when
+    the response is sent.  Each background task calls _make_db() at the top
+    and closes the session in its own finally block.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from config import settings
+
+    engine = create_engine(
+        settings.database_url, connect_args={"check_same_thread": False}
+    )
+    return sessionmaker(bind=engine)()
 
 
 def get_db():
@@ -75,15 +99,17 @@ async def _run_pipeline(db: Session, document_id: int, file_path: Path) -> None:
 
 
 async def _bg_process_wa_document(
-    db: Session, document_id: int, media_id: str, dest_path: Path, sender: str
+    document_id: int, media_id: str, dest_path: Path, sender: str
 ) -> None:
     """Background: download first doc (cuestionario), store path, ask for consultor data."""
     from channels.whatsapp import download_media
     from channels.whatsapp import send_text
 
+    db = _make_db()
     ok = await download_media(media_id, str(dest_path))
     if not ok:
         crud.update_document_status(db, document_id, "error")
+        db.close()
         await send_text(
             sender, "No pude descargar tu archivo. Por favor inténtalo de nuevo."
         )
@@ -102,6 +128,7 @@ async def _bg_process_wa_document(
         source="system",
     )
     crud.update_document_status(db, document_id, "waiting_transcript")
+    db.close()
 
     await send_text(
         sender,
@@ -114,15 +141,17 @@ async def _bg_process_wa_document(
 
 
 async def _bg_process_wa_transcript(
-    db: Session, document_id: int, media_id: str, dest_path: Path, sender: str
+    document_id: int, media_id: str, dest_path: Path, sender: str
 ) -> None:
     """Background: download transcript PDF, run full pipeline with both docs."""
     from agents.extractor import read_document_text
     from channels.whatsapp import download_media
     from channels.whatsapp import send_text
 
+    db = _make_db()
     ok = await download_media(media_id, str(dest_path))
     if not ok:
+        db.close()
         await send_text(
             sender, "No pude descargar la transcripción. Inténtalo de nuevo."
         )
@@ -140,6 +169,7 @@ async def _bg_process_wa_transcript(
         (f.field_value for f in fields if f.field_name == "_file_path"), None
     )
     if not cuestionario_path_str:
+        db.close()
         await send_text(sender, "Error interno: no encontré el cuestionario original.")
         return
 
@@ -154,6 +184,7 @@ async def _bg_process_wa_transcript(
     result = await process_document(
         db, document_id, Path(cuestionario_path_str), transcript_text=transcript_text
     )
+    db.close()
     status = result.get("status")
 
     if status in ("waiting_web_confirmation", "waiting_web_url"):
@@ -166,11 +197,12 @@ async def _bg_process_wa_transcript(
         await send_text(sender, "Error procesando los documentos. Inténtalo de nuevo.")
 
 
-async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
+async def _bg_process_wa_text(sender: str, text: str) -> None:
     """Background: route incoming WhatsApp text to the correct pipeline stage."""
     from channels.whatsapp import send_document as wa_send_document
     from channels.whatsapp import send_text
 
+    db = _make_db()
     text_lower = text.lower().strip()
 
     # CAMBIO 4: nombre consultor + cargo + fecha reunión (doc waiting for transcript)
@@ -310,6 +342,7 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
         return
 
     # No active document found
+    db.close()
     await send_text(
         sender, "Hola, envíame un documento PDF o Word para generar tu informe DPI."
     )
@@ -335,12 +368,11 @@ async def verify_whatsapp_webhook(
 async def webhook_whatsapp(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
     """Receive Meta WhatsApp webhook events and route to the correct handler.
 
     Meta requires a 200 OK response within 5 seconds. All processing is done
-    in background tasks.
+    in background tasks that open their own DB sessions via _make_db().
     """
     import time
 
@@ -364,8 +396,19 @@ async def webhook_whatsapp(
         return {"status": "ok"}
 
     msg = messages[0]
+    msg_id = msg.get("id", "")
     sender = msg.get("from", "")
     msg_type = msg.get("type", "")
+
+    # Deduplicate: Meta sometimes delivers the same webhook twice.
+    global _seen_msg_ids
+    if msg_id and msg_id in _seen_msg_ids:
+        return {"status": "ok"}
+    if msg_id:
+        _seen_msg_ids.add(msg_id)
+        if len(_seen_msg_ids) > _MAX_SEEN:
+            # Evict oldest entries by rebuilding a smaller set
+            _seen_msg_ids = set(list(_seen_msg_ids)[-_MAX_SEEN // 2 :])
 
     if msg_type in ("document", "image"):
         media_info = msg.get(msg_type, {})
@@ -379,26 +422,31 @@ async def webhook_whatsapp(
         dest_path = UPLOAD_DIR / f"{int(time.time())}_{filename}"
 
         # CAMBIO 1: check if sender is already waiting for a transcript
-        waiting_doc = crud.get_document_waiting_transcript(db, sender)
+        # Use a short-lived session just for this synchronous lookup.
+        _db = _make_db()
+        waiting_doc = crud.get_document_waiting_transcript(_db, sender)
         if waiting_doc:
+            _doc_id = waiting_doc.id
+            _db.close()
             background_tasks.add_task(
                 _bg_process_wa_transcript,
-                db,
-                waiting_doc.id,
+                _doc_id,
                 media_id,
                 dest_path,
                 sender,
             )
         else:
-            doc = crud.create_document(db, "whatsapp", sender, filename)
+            doc = crud.create_document(_db, "whatsapp", sender, filename)
+            _doc_id = doc.id
+            _db.close()
             background_tasks.add_task(
-                _bg_process_wa_document, db, doc.id, media_id, dest_path, sender
+                _bg_process_wa_document, _doc_id, media_id, dest_path, sender
             )
 
     elif msg_type == "text":
         text = msg.get("text", {}).get("body", "")
         if text:
-            background_tasks.add_task(_bg_process_wa_text, db, sender, text)
+            background_tasks.add_task(_bg_process_wa_text, sender, text)
 
     return {"status": "ok"}
 
