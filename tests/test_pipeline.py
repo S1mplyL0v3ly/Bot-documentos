@@ -952,11 +952,11 @@ def test_extract_relevant_sections_long_doc():
     relevant_b = "Facturación estable durante los últimos tres años\n"
     long_text = irrelevant + relevant_a + irrelevant2 + relevant_b
 
-    result = extract_relevant_sections(long_text, max_chars=5000)
+    result = extract_relevant_sections(long_text, max_chars=12000)
 
     assert "5 empleados" in result
     assert "Facturación estable" in result
-    assert len(result) <= 5000
+    assert len(result) <= 12000
 
 
 def test_extract_relevant_sections_short_doc():

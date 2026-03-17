@@ -750,7 +750,7 @@ def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dic
     if transcript_text:
         combined += (
             f"\n\n=== TRANSCRIPCIÓN ENTREVISTA ===\n"
-            f"{extract_relevant_sections(transcript_text, 5000)}"
+            f"{extract_relevant_sections(transcript_text, 12000)}"
         )
     prompt = EXTRACTOR_PROMPT.format(text=combined)
     raw = run_claude(prompt)
