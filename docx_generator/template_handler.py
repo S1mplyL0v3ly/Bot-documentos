@@ -17,7 +17,7 @@ from config import BASE_DIR, TEMPLATES_DIR
 
 OUTPUT_DIR = BASE_DIR / "outputs"
 DEFAULT_TEMPLATE = TEMPLATES_DIR / "plantilla.docx"
-GREEN_FILL = "92D050"  # color celda seleccionada
+GREEN_FILL = "70AD47"  # color celda seleccionada (verde DPI Canarias)
 
 # Markers en párrafos libres → clave en free_texts
 FREE_TEXT_MARKERS = {
@@ -48,6 +48,37 @@ _DAFO_HEADER_KEYWORDS = {
     "amenazas",
     "oportunidades",
 }
+
+# Positional row indices in doc.tables[1] per DPI criterion.
+# col[0] = option label, col[1] = [Valorar] / {{placeholder}} to clear.
+_OPTION_MAP: dict[str, list[int]] = {
+    "situacion_empresa": [7, 8, 9],
+    "num_empleados": [12, 13],
+    "facturacion": [16, 17, 18, 19],
+    "evolucion_facturacion": [22, 23, 24],
+    "recursos_economicos": [27, 28],
+    "experiencia_internacional": [33, 34, 35],
+    "alcance_actividad": [38, 39, 40],
+    "num_paises": [43, 44, 45],
+    "personal_internacionalizacion": [48, 49],
+    "involuccion_gerencia": [52, 53, 54, 55],
+    "adaptacion_demanda": [58, 59, 60],
+    "adaptacion_producto": [63, 64, 65],
+    "tiene_web": [70, 71],
+    "ecommerce": [74, 75, 76],
+    "mercados_electronicos": [79, 80, 81, 82],
+    "redes_sociales": [85, 86, 87],
+}
+
+# Placeholder keys in table[1] header rows that must be cleared to "".
+_DPI_TABLE_PLACEHOLDERS = (
+    "VALOR_CONSTITUCION",
+    "valor_empleados",
+    "valor_facturacion",
+    "evolucion_facturacion",
+    "evolucion_recursos",
+    "valorar",
+)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -214,6 +245,63 @@ def _apply_selections(doc: Document, selections: dict[str, str | None]) -> None:
                     _set_cell_background(cell, GREEN_FILL)
 
 
+def _apply_dpi_options(doc: Document, selections: dict[str, str | None]) -> None:
+    """Clear all [Valorar] placeholders and mark selected option rows green.
+
+    Step 1: Clear every cell in doc.tables[1] whose text is exactly '[Valorar]'
+            or '{{valorar}}' (the block/criterion header cells).
+    Step 2: For each criterion in _OPTION_MAP, clear col[1] for all option rows
+            (removes {{VALOR_CONSTITUCION}} etc.), then paint col[0]+col[1] green
+            for the row whose label matches the selected value (normalized).
+    """
+    if len(doc.tables) < 2:
+        return
+    table = doc.tables[1]
+    rows = table.rows
+    n_rows = len(rows)
+
+    # Step 1: Clear block/criterion header [Valorar] / {{valorar}} cells.
+    _VALORAR_NORMS = {"[valorar]", "{{valorar}}"}
+    for row in rows:
+        seen: set[int] = set()
+        for cell in row.cells:
+            cid = id(cell._tc)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            if _normalize_text(cell.text) in _VALORAR_NORMS:
+                _set_cell_text(cell, "")
+
+    # Step 2: Per-criterion option row processing.
+    for criterion, option_rows in _OPTION_MAP.items():
+        selected = selections.get(criterion)
+        selected_norm = _normalize_text(selected) if selected else None
+
+        for row_idx in option_rows:
+            if row_idx >= n_rows:
+                continue
+            row_cells = rows[row_idx].cells
+            if len(row_cells) < 2:
+                continue
+
+            # Always clear col[1] (may hold {{VALOR_CONSTITUCION}} etc.)
+            _set_cell_text(row_cells[1], "")
+
+            if not selected_norm:
+                continue
+
+            cell_norm = _normalize_text(row_cells[0].text)
+            # Bidirectional containment handles minor wording differences
+            # e.g. "Ninguna" matches "Ninguna experiencia"
+            if (
+                cell_norm == selected_norm
+                or selected_norm in cell_norm
+                or cell_norm in selected_norm
+            ):
+                _set_cell_background(row_cells[0], GREEN_FILL)
+                _set_cell_background(row_cells[1], GREEN_FILL)
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 
@@ -264,13 +352,19 @@ def render_template(
         if optional_key not in direct_fields:
             direct_fields[optional_key] = ""
 
+    # Clear DPI table header placeholders ({{valorar}}, {{VALOR_CONSTITUCION}}, etc.)
+    for ph_key in _DPI_TABLE_PLACEHOLDERS:
+        if not any(k.lower() == ph_key.lower() for k in direct_fields):
+            direct_fields[ph_key] = ""
+
     selections: dict[str, str | None] = data.get("selections", {})
     free_texts: dict[str, str] = {
         k: (v or "") for k, v in data.get("free_texts", {}).items()
     }
 
     _apply_direct_fields_to_paragraphs(doc, direct_fields)
-    _apply_selections(doc, selections)
+    _apply_dpi_options(doc, selections)  # positional green cells + clear [Valorar]
+    _apply_selections(doc, selections)  # legacy text-match fallback for other tables
     _apply_dafo_direct(doc, free_texts)  # positional fill (BUG 3)
     _apply_free_texts_to_paragraphs(
         doc, free_texts

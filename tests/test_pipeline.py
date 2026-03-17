@@ -855,3 +855,88 @@ def test_search_cif_ddg_returns_none_on_exception():
         result = search_cif_ddg("Any Company")
 
     assert result is None
+
+
+def test_template_green_cells_and_no_valorar():
+    """render_template marks selected option green and clears all [Valorar] / {{valorar}}."""
+    import tempfile
+    from pathlib import Path
+    from docx_generator.template_handler import render_template, GREEN_FILL
+
+    data = {
+        "direct_fields": {"Razon_Social": "Test SL"},
+        "selections": {
+            "situacion_empresa": "Más de 2 años",  # row 9  in table[1]
+            "num_empleados": "Más de 2",  # row 13
+            "facturacion": "Menos de 200.000 €",  # row 16
+            "evolucion_facturacion": "En crecimiento",  # row 24
+            "experiencia_internacional": "Ninguna",  # row 33 (partial match)
+            "alcance_actividad": "Nacional",  # row 39
+            "tiene_web": "Si",  # row 71
+            "ecommerce": "Tienda web propia con ventas bajas o irregulares",  # row 74
+            "redes_sociales": "Redes sociales activas y planificadas",  # row 86
+        },
+        "free_texts": {},
+    }
+
+    output_path = render_template(document_id=9999, data=data, empresa_name="TestSL")
+    assert output_path.exists()
+
+    from docx import Document
+
+    doc = Document(str(output_path))
+    table = doc.tables[1]
+
+    def get_fill(cell):
+        tc = cell._tc
+        tcPr = tc.find(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tcPr"
+        )
+        if tcPr is None:
+            return None
+        shd = tcPr.find(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd"
+        )
+        if shd is None:
+            return None
+        return shd.get(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fill"
+        )
+
+    # 1. Selected option rows must be green in both col[0] and col[1]
+    green_rows = {
+        9: "Más de 2 años",
+        13: "Más de 2",
+        16: "Menos de 200.000 €",
+        24: "En crecimiento",
+        33: "Ninguna experiencia",  # cell text (bidirectional match)
+        39: "Nacional",
+        71: "Si",
+        74: "Tienda web propia con ventas bajas o irregulares",
+        86: "Redes sociales activas y planificadas",
+    }
+    for row_idx, label in green_rows.items():
+        row = table.rows[row_idx]
+        fill0 = get_fill(row.cells[0])
+        fill1 = get_fill(row.cells[1])
+        assert fill0 == GREEN_FILL, f"row {row_idx} ({label}) col[0] not green: {fill0}"
+        assert fill1 == GREEN_FILL, f"row {row_idx} ({label}) col[1] not green: {fill1}"
+
+    # 2. No cell in table[1] should contain [Valorar] or {{valorar}} text
+    for r_idx, row in enumerate(table.rows):
+        seen: set[int] = set()
+        for cell in row.cells:
+            cid = id(cell._tc)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            txt = cell.text.strip().lower()
+            assert (
+                "[valorar]" not in txt
+            ), f"[Valorar] not cleared at row {r_idx}: '{cell.text}'"
+            assert (
+                "{{valorar}}" not in txt
+            ), f"{{valorar}} not cleared at row {r_idx}: '{cell.text}'"
+
+    # Cleanup
+    output_path.unlink(missing_ok=True)
