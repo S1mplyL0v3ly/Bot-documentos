@@ -11,8 +11,10 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from agents.extractor import CRITERION_OPTIONS, extract_dpi_fields, read_document_text
+from agents.web_scraper import find_best_candidate
 from config import JARVIS_DB_PATH, settings
 from database import crud
+from database.models import Document
 from docx_generator.template_handler import render_template
 
 # Human-readable questions for each DPI criterion
@@ -260,6 +262,191 @@ def _load_fields_from_db(db: Session, document_id: int) -> dict[str, dict]:
     return {"direct_fields": direct, "selections": selections, "free_texts": texts}
 
 
+# ─── Web search / confirmation ────────────────────────────────────────────────
+
+
+async def trigger_web_search(db: Session, document_id: int) -> dict:
+    """Search for the company website and store candidate.
+
+    Returns a dict with status and the message to send to the consultant.
+    """
+    fields = crud.get_fields(db, document_id)
+    empresa_name = next(
+        (
+            f.field_value
+            for f in fields
+            if f.field_name == f"{PREFIX_DIRECT}Razon_Social"
+        ),
+        "",
+    )
+    if not empresa_name:
+        # No company name → skip web step
+        return {"status": "no_company_name"}
+
+    doc = db.get(Document, document_id)
+    cache = None
+    if doc and doc.web_search_cache:
+        try:
+            cache = json.loads(doc.web_search_cache)
+        except Exception:
+            pass
+
+    result = find_best_candidate(empresa_name, cache=cache)
+
+    # Persist search cache
+    if doc:
+        doc.web_search_cache = json.dumps(result["search_cache"])
+        db.commit()
+
+    # Persist DPI signals from web (only if confident enough)
+    for key, value in result["dpi_signals"].get("selections", {}).items():
+        conf = result["dpi_signals"]["confidence"].get(key, 0.0)
+        crud.upsert_field(
+            db,
+            document_id,
+            f"{PREFIX_SELECTION}{key}",
+            value,
+            confidence=conf,
+            source="scraper",
+        )
+    for key, value in result["dpi_signals"].get("direct_fields", {}).items():
+        crud.upsert_field(
+            db,
+            document_id,
+            f"{PREFIX_DIRECT}{key}",
+            value,
+            confidence=0.9,
+            source="scraper",
+        )
+
+    candidate_url = result["url"]
+    if candidate_url:
+        if doc:
+            doc.web_candidate_url = candidate_url
+            db.commit()
+        crud.update_document_status(db, document_id, "waiting_web_confirmation")
+        msg = (
+            f"🌐 *He encontrado una posible web para {empresa_name}:*\n"
+            f"{candidate_url}\n\n"
+            "¿Es correcta?\n"
+            "• Responde *CONFIRMAR* si es la web de la empresa\n"
+            "• Responde *NO TIENE WEB* si la empresa no tiene página\n"
+            "• Responde *OTRA WEB* y la URL si la web correcta es diferente"
+        )
+        return {
+            "status": "waiting_web_confirmation",
+            "message": msg,
+            "url": candidate_url,
+        }
+    else:
+        # No candidate found → ask consultant directly
+        crud.update_document_status(db, document_id, "waiting_web_url")
+        msg = (
+            f"🌐 No encontré la web de *{empresa_name}* automáticamente.\n\n"
+            "Por favor, envíame la URL de su página web (ej: https://empresa.com)\n"
+            "o escribe *NO TIENE WEB* si no dispone de ella."
+        )
+        return {"status": "waiting_web_url", "message": msg}
+
+
+async def handle_web_confirmation(
+    db: Session, document_id: int, text: str, sender: str
+) -> dict:
+    """Process consultant reply to the web confirmation/url request.
+
+    Returns dict with status and optional next message.
+    """
+    from channels.whatsapp import send_text
+
+    text_lower = text.lower().strip()
+    doc = db.get(Document, document_id)
+    empresa_name = ""
+    fields = crud.get_fields(db, document_id)
+    for f in fields:
+        if f.field_name == f"{PREFIX_DIRECT}Razon_Social":
+            empresa_name = f.field_value or ""
+
+    no_web_phrases = {"no tiene web", "sin web", "no hay web", "no tiene página"}
+    is_no_web = any(p in text_lower for p in no_web_phrases)
+
+    # Detect URL in text
+    url_match = re.search(r"https?://[^\s]+", text)
+
+    if is_no_web:
+        # Consultant confirms no website
+        crud.upsert_field(
+            db,
+            document_id,
+            f"{PREFIX_SELECTION}tiene_web",
+            "No",
+            confidence=1.0,
+            source="manual",
+        )
+        if doc:
+            doc.web_candidate_url = None
+            db.commit()
+        crud.update_document_status(db, document_id, "processing")
+        return {"status": "confirmed_no_web"}
+
+    elif "confirmar" in text_lower and doc and doc.web_candidate_url:
+        # Consultant confirms the suggested URL
+        confirmed_url = doc.web_candidate_url
+        crud.upsert_field(
+            db,
+            document_id,
+            f"{PREFIX_SELECTION}tiene_web",
+            "Sí",
+            confidence=1.0,
+            source="manual",
+        )
+        crud.upsert_field(
+            db,
+            document_id,
+            f"{PREFIX_DIRECT}WEB",
+            confirmed_url,
+            confidence=1.0,
+            source="manual",
+        )
+        crud.update_document_status(db, document_id, "processing")
+        return {"status": "confirmed_url", "url": confirmed_url}
+
+    elif url_match or "otra web" in text_lower:
+        # Consultant provides a different URL or we need them to send one
+        if url_match:
+            new_url = url_match.group(0).rstrip(".,;)")
+            crud.upsert_field(
+                db,
+                document_id,
+                f"{PREFIX_SELECTION}tiene_web",
+                "Sí",
+                confidence=1.0,
+                source="manual",
+            )
+            crud.upsert_field(
+                db,
+                document_id,
+                f"{PREFIX_DIRECT}WEB",
+                new_url,
+                confidence=1.0,
+                source="manual",
+            )
+            if doc:
+                doc.web_candidate_url = new_url
+                db.commit()
+            crud.update_document_status(db, document_id, "processing")
+            return {"status": "confirmed_url", "url": new_url}
+        else:
+            # "OTRA WEB" without URL → ask for it
+            crud.update_document_status(db, document_id, "waiting_web_url")
+            return {
+                "status": "waiting_web_url",
+                "message": "Perfecto, ¿cuál es la URL correcta? (ej: https://empresa.com)",
+            }
+
+    # Unrecognised reply — re-prompt
+    return {"status": "unrecognised"}
+
+
 # ─── FASE 1 ───────────────────────────────────────────────────────────────────
 
 
@@ -314,6 +501,15 @@ async def process_document(
                 source="claude",
             )
 
+        # Web search step: runs BEFORE asking the consultant questions
+        web_result = await trigger_web_search(db, document_id)
+        if web_result["status"] in ("waiting_web_confirmation", "waiting_web_url"):
+            _log_to_jarvis(True, document_id, f"fase1_ok web={web_result['status']}")
+            return {
+                "status": web_result["status"],
+                "question_message": web_result["message"],
+            }
+
         # Generate user questions for null selections
         question_msg = generate_questions(db, document_id)
         null_count = question_msg.count("\n•") if question_msg else 0
@@ -333,6 +529,16 @@ async def process_document(
         crud.update_document_status(db, document_id, "error")
         _log_to_jarvis(False, document_id, str(exc)[:200])
         raise
+
+
+async def proceed_after_web(db: Session, document_id: int) -> dict:
+    """Called after web confirmation is resolved. Continues to FASE 2 or FASE 3."""
+    question_msg = generate_questions(db, document_id)
+    null_count = question_msg.count("\n•") if question_msg else 0
+    if null_count == 0:
+        return await generate_draft_texts(db, document_id)
+    crud.update_document_status(db, document_id, "waiting_user_response")
+    return {"status": "waiting_user_response", "question_message": question_msg}
 
 
 # ─── FASE 2 ───────────────────────────────────────────────────────────────────

@@ -624,6 +624,77 @@ def test_apply_logical_implications_does_not_overwrite():
 # ─── Visual PDF detection ─────────────────────────────────────────────────────
 
 
+# ─── Web scraper ─────────────────────────────────────────────────────────────
+
+
+def test_score_url_match_high_for_company_name_in_domain():
+    """URL whose domain contains company tokens scores > 0.4."""
+    from agents.web_scraper import _score_url_match
+
+    html = "<html><title>Joyeria Atelier Maria</title><body>Joyeria Atelier Maria</body></html>"
+    score = _score_url_match("https://atelier-maria.com", html, "Atelier Maria")
+    assert score >= 0.4, f"Expected score >= 0.4, got {score}"
+
+
+def test_score_url_match_low_for_unrelated_domain():
+    """URL with no company tokens scores < 0.3."""
+    from agents.web_scraper import _score_url_match
+
+    html = "<html><title>Another Company</title><body>Unrelated content</body></html>"
+    score = _score_url_match(
+        "https://unrelated-site.com", html, "Atelier Maria Secretos"
+    )
+    assert score < 0.3, f"Expected score < 0.3, got {score}"
+
+
+def test_build_dpi_from_web_detects_social_and_ecommerce():
+    """HTML with Instagram link + cart button → redes_sociales + ecommerce detected."""
+    from agents.web_scraper import _build_dpi_from_web
+
+    html = (
+        "<html><body>"
+        '<a href="https://instagram.com/atelier_maria">Instagram</a>'
+        '<a href="https://facebook.com/ateliermaria">Facebook</a>'
+        '<button class="add-to-cart">Comprar</button>'
+        "</body></html>"
+    )
+    signals = _build_dpi_from_web("https://atelier-maria.com", html)
+    assert signals["selections"].get("tiene_web") == "Sí"
+    assert (
+        signals["selections"].get("redes_sociales")
+        == "Redes sociales activas y planificadas"
+    )
+    assert signals["selections"].get("ecommerce") is not None
+    assert signals["confidence"].get("redes_sociales", 0) >= 0.7
+
+
+def test_build_dpi_from_web_detects_cif():
+    """CIF in page footer is extracted to direct_fields."""
+    from agents.web_scraper import _build_dpi_from_web
+
+    html = (
+        "<html><body>" "<footer>CIF: B12345678 | Aviso legal</footer>" "</body></html>"
+    )
+    signals = _build_dpi_from_web("https://empresa.com", html)
+    assert signals["direct_fields"].get("CIF") == "B12345678"
+
+
+def test_build_dpi_from_web_lang_selector_implies_internacional():
+    """hreflang attribute on page → alcance_actividad = Internacional."""
+    from agents.web_scraper import _build_dpi_from_web
+
+    html = (
+        "<html><head>"
+        '<link rel="alternate" hreflang="en" href="https://empresa.com/en"/>'
+        "</head><body>Welcome / Bienvenidos</body></html>"
+    )
+    signals = _build_dpi_from_web("https://empresa.com", html)
+    assert signals["selections"].get("alcance_actividad") == "Internacional"
+
+
+# ─── Visual PDF detection ─────────────────────────────────────────────────────
+
+
 def test_read_google_forms_pdf_atelier_maria():
     """Verifica detección visual de casillas en PDF real de Google Forms."""
     import os

@@ -38,6 +38,12 @@ class Document(Base):
         default="pending",
     )  # pending | processing | complete | error | waiting_fields | waiting_transcript
     transcript_text = Column(Text, nullable=True)  # CAMBIO 1: second document text
+    web_candidate_url = Column(
+        Text, nullable=True
+    )  # URL candidata encontrada por scraper
+    web_search_cache = Column(
+        Text, nullable=True
+    )  # JSON: resultados búsqueda DuckDuckGo
 
     extracted_fields = relationship(
         "ExtractedField", back_populates="document", cascade="all, delete-orphan"

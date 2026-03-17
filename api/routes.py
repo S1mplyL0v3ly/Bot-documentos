@@ -20,6 +20,8 @@ from agents.orchestrator import (
     apply_draft_changes,
     generate_final_docx,
     generate_questions,
+    handle_web_confirmation,
+    proceed_after_web,
     process_document,
     process_user_response,
 )
@@ -178,6 +180,32 @@ async def _bg_process_wa_text(db: Session, sender: str, text: str) -> None:
                 "✅ *Datos guardados.*\n\n"
                 "Ahora envíame la *transcripción de la entrevista* en PDF.",
             )
+            return
+
+    # Web confirmation — waiting_web_confirmation or waiting_web_url
+    for web_status in ("waiting_web_confirmation", "waiting_web_url"):
+        web_doc = crud.get_document_by_sender_and_status(db, sender, web_status)
+        if web_doc:
+            result = await handle_web_confirmation(db, web_doc.id, text, sender)
+            status = result.get("status")
+            if status in ("confirmed_url", "confirmed_no_web"):
+                # Web step resolved → continue with questions
+                next_result = await proceed_after_web(db, web_doc.id)
+                next_status = next_result.get("status")
+                if next_status == "waiting_user_response":
+                    await send_text(sender, next_result["question_message"])
+                elif next_status == "waiting_approval":
+                    await send_text(sender, next_result["draft_message"])
+            elif status == "waiting_web_url":
+                await send_text(sender, result["message"])
+            elif status == "unrecognised":
+                await send_text(
+                    sender,
+                    "No entendí tu respuesta. Por favor responde:\n"
+                    "• *CONFIRMAR* — la web es correcta\n"
+                    "• *NO TIENE WEB* — la empresa no tiene página\n"
+                    "• *OTRA WEB https://...* — indicando la URL correcta",
+                )
             return
 
     # Approval keywords → FASE 4

@@ -10,12 +10,18 @@ from database.models import Base
 
 def _migrate_existing_db(engine) -> None:
     """Add columns that may not exist in older installs (safe no-op if already present)."""
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN transcript_text TEXT"))
-            conn.commit()
-    except Exception:
-        pass  # Column already exists
+    migrations = [
+        "ALTER TABLE documents ADD COLUMN transcript_text TEXT",
+        "ALTER TABLE documents ADD COLUMN web_candidate_url TEXT",
+        "ALTER TABLE documents ADD COLUMN web_search_cache TEXT",
+    ]
+    for sql in migrations:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(sql))
+                conn.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 def init_db() -> None:
