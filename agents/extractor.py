@@ -183,11 +183,28 @@ ecommerce → opciones: "Sin tienda web" | "Tienda web propia con ventas bajas o
 mercados_electronicos → opciones: "Sin presencia en mercados electrónicos" | "Con presencia en mercados electrónicos sin ventas o ventas bajas." | "Con presencia en mercados electrónicos con ventas internacionales"
 redes_sociales → opciones: "Redes sociales inactivas o con bajo uso" | "Redes sociales activas y planificadas" | "Redes sociales activas y con generación de ventas"
 
+Si el documento incluye una sección === TRANSCRIPCIÓN ENTREVISTA ===, extrae de ella información
+adicional para criterios no determinados por el cuestionario. Ejemplos de mapeo para transcripción:
+• "tiene N empleados / trabajan N personas" (N>2) → num_empleados = "Más de 2" (conf 0.9)
+• "facturación estable / se mantiene / igual que el año pasado" → evolucion_facturacion = "Se mantiene estable" (conf 0.9)
+• "en crecimiento / ha subido / mejorando" → evolucion_facturacion = "En crecimiento" (conf 0.9)
+• "Instagram / Facebook / TikTok activo" SIN mención de estrategia → redes_sociales = "Redes sociales inactivas o con bajo uso" (conf 0.8)
+• "estrategia de redes / calendario editorial / planificadas" → redes_sociales = "Redes sociales activas y planificadas" (conf 0.9)
+• "sin redes sociales / no tienen redes" → redes_sociales = "Redes sociales inactivas o con bajo uso" (conf 0.9)
+• "no tienen tienda online / no venden por internet / sin ecommerce" → ecommerce = "Sin tienda web" (conf 0.95)
+• "no venden por Amazon / Etsy / marketplaces / sin presencia" → mercados_electronicos = "Sin presencia en mercados electrónicos" (conf 0.95)
+• "alta adaptación / personalizado / a medida / customizado" → adaptacion_demanda = "Alta" y adaptacion_producto = "Alta" (conf 0.85)
+• "media adaptación / alguna adaptación" → adaptacion_demanda = "Media" y adaptacion_producto = "Media" (conf 0.8)
+• "no tienen personal dedicado / lo lleva el gerente / sin departamento de exportación" → personal_dedicado = "No" (conf 0.9)
+• "tienen personal dedicado / hay un responsable de exportación" → personal_dedicado = "Sí" (conf 0.9)
+• "no tienen recursos / sin presupuesto para internacionalización" → recursos_internacionalizacion = "No" (conf 0.9)
+
 INSTRUCCIONES:
 - Las líneas que empiezan por ◉ o ☑ en la sección OPCIONES SELECCIONADAS son selecciones confirmadas
   visualmente. Para esas opciones, usa confianza = 0.95 aunque la opción del formulario no coincida
   exactamente con las opciones DPI listadas (aproxima al rango más cercano con confianza 0.95).
 - Si el documento es un cuestionario con respuestas explícitas, usa confianza ≥ 0.95 para esas respuestas.
+- Para datos de la transcripción, usa confianza ≥ 0.8 cuando el mapeo es claro (ver ejemplos arriba).
 - Usa null si la información no aparece o no es suficiente para elegir con confianza ≥ 0.7.
 - La confianza refleja qué tan seguro estás: 0.0 = adivinanza, 1.0 = dato explícito en el documento.
 - Responde ÚNICAMENTE con JSON válido, sin markdown.
