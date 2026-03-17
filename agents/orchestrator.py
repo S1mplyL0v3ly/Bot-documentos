@@ -539,12 +539,12 @@ async def process_document(
 
         # Generate user questions for null selections
         question_msg = generate_questions(db, document_id)
-        null_count = question_msg.count("\n•") if question_msg else 0
 
-        if null_count == 0:
+        if not question_msg:
             # All selections filled → jump straight to FASE 3
             return await generate_draft_texts(db, document_id)
 
+        null_count = question_msg.count("\n") if question_msg else 0
         crud.update_document_status(db, document_id, "waiting_user_response")
         _log_to_jarvis(True, document_id, f"fase1_ok null_selections={null_count}")
         return {
@@ -561,8 +561,7 @@ async def process_document(
 async def proceed_after_web(db: Session, document_id: int) -> dict:
     """Called after web confirmation is resolved. Continues to FASE 2 or FASE 3."""
     question_msg = generate_questions(db, document_id)
-    null_count = question_msg.count("\n•") if question_msg else 0
-    if null_count == 0:
+    if not question_msg:
         return await generate_draft_texts(db, document_id)
     crud.update_document_status(db, document_id, "waiting_user_response")
     return {"status": "waiting_user_response", "question_message": question_msg}
@@ -581,7 +580,7 @@ def generate_questions(db: Session, document_id: int) -> str:
     null_criteria = [
         f.field_name[len(PREFIX_SELECTION) :]
         for f in fields
-        if f.field_name.startswith(PREFIX_SELECTION) and f.field_value is None
+        if f.field_name.startswith(PREFIX_SELECTION) and not f.field_value
     ]
 
     if not null_criteria:

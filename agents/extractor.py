@@ -624,16 +624,16 @@ def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dic
     """Extract DPI fields and selections from document text using Claude.
 
     Args:
-        cuestionario_text: Raw text from the cuestionario PDF (up to 5000 chars).
-        transcript_text: Optional transcript text from interview PDF (up to 3000 chars).
+        cuestionario_text: Raw text from the cuestionario PDF (up to 15000 chars).
+        transcript_text: Optional transcript text from interview PDF (up to 5000 chars).
 
     Returns:
         dict with keys: direct_fields, selections, confidence
         Selections with confidence < 0.7 are set to null.
     """
-    combined = f"=== CUESTIONARIO ===\n{cuestionario_text[:5000]}"
+    combined = f"=== CUESTIONARIO ===\n{cuestionario_text[:15000]}"
     if transcript_text:
-        combined += f"\n\n=== TRANSCRIPCIÓN ENTREVISTA ===\n{transcript_text[:3000]}"
+        combined += f"\n\n=== TRANSCRIPCIÓN ENTREVISTA ===\n{transcript_text[:5000]}"
     prompt = EXTRACTOR_PROMPT.format(text=combined)
     raw = run_claude(prompt)
     data = _parse_json_response(raw)
