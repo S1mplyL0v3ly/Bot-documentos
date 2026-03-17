@@ -627,6 +627,14 @@ def _apply_logical_implications(data: dict) -> dict:
         selections["num_paises"] = "Ninguno salvo el mercado nacional"
         confidence["num_paises"] = 0.95
 
+    # FIX 3: company with no exports cannot have Internacional current scope.
+    # ALCANCE_MAP triggers on "mercados de interés" (desired future markets),
+    # which must not override the actual current sales scope.
+    alc = selections.get("alcance_actividad")
+    if exp == "Ninguna experiencia" and alc == "Internacional":
+        selections["alcance_actividad"] = "Nacional"
+        confidence["alcance_actividad"] = 0.9
+
     alc = selections.get("alcance_actividad")
     if alc == "Internacional" and not selections.get("num_paises"):
         selections["num_paises"] = "De 1 a 5"

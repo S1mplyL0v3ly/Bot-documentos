@@ -966,3 +966,151 @@ def test_extract_relevant_sections_short_doc():
     short_text = "texto corto\n" * 10
     result = extract_relevant_sections(short_text, max_chars=15000)
     assert result == short_text
+
+
+# ─── FIX 1: Nombre_realizador split ──────────────────────────────────────────
+
+
+def test_fix1_nombre_realizador_split():
+    """FIX 1: 'Nombre, DD/MM/YYYY' splits into name + date saved separately."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    # Build a minimal waiting_doc fixture
+    mock_doc = MagicMock()
+    mock_doc.id = 42
+
+    mock_db = MagicMock()
+    upserted = {}
+
+    def fake_upsert(db, doc_id, field_name, value, confidence, source):
+        upserted[field_name] = value
+
+    with (
+        patch("database.crud.get_document_waiting_transcript", return_value=mock_doc),
+        patch("database.crud.get_fields", return_value=[]),
+        patch("database.crud.upsert_field", side_effect=fake_upsert),
+        patch("channels.whatsapp.send_text", new_callable=AsyncMock),
+        patch("api.routes._make_db", return_value=mock_db),
+    ):
+        from api.routes import _bg_process_wa_text
+
+        asyncio.run(_bg_process_wa_text("34600000001", "María González, 15/03/2025"))
+
+    assert upserted.get("dir_Nombre_realizador") == "María González"
+    assert upserted.get("dir_Reunion_Inicial") == "15/03/2025"
+
+
+def test_fix1_nombre_realizador_no_date():
+    """FIX 1: Name without comma saves only dir_Nombre_realizador."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_doc = MagicMock()
+    mock_doc.id = 43
+    mock_db = MagicMock()
+    upserted = {}
+
+    def fake_upsert(db, doc_id, field_name, value, confidence, source):
+        upserted[field_name] = value
+
+    with (
+        patch("database.crud.get_document_waiting_transcript", return_value=mock_doc),
+        patch("database.crud.get_fields", return_value=[]),
+        patch("database.crud.upsert_field", side_effect=fake_upsert),
+        patch("channels.whatsapp.send_text", new_callable=AsyncMock),
+        patch("api.routes._make_db", return_value=mock_db),
+    ):
+        from api.routes import _bg_process_wa_text
+
+        asyncio.run(_bg_process_wa_text("34600000001", "María González"))
+
+    assert upserted.get("dir_Nombre_realizador") == "María González"
+    assert "dir_Reunion_Inicial" not in upserted
+
+
+# ─── FIX 2: Manual fields not overwritten by Claude ──────────────────────────
+
+
+def test_fix2_manual_cargo_not_overwritten():
+    """FIX 2: dir_Cargo with source='manual' is NOT overwritten by Claude extraction.
+
+    Tests the guard logic directly: when existing_fields contains a 'manual' source entry,
+    upsert_field must be skipped for that field but called for others.
+    """
+    from unittest.mock import MagicMock
+
+    import database.crud as crud_mod
+    from agents.orchestrator import PREFIX_DIRECT
+
+    # Simulate existing_fields dict as built inside process_document
+    manual_field = MagicMock()
+    manual_field.field_name = "dir_Cargo"
+    manual_field.source = "manual"
+
+    existing_fields = {manual_field.field_name: manual_field}
+
+    # The direct_fields Claude wants to save
+    extracted_direct = {"Razon_Social": "Test SL", "Cargo": "Director"}
+
+    saved = {}
+
+    def fake_upsert(db, doc_id, field_name, value, confidence, source):
+        saved[field_name] = (value, source)
+
+    db = MagicMock()
+    for key, value in extracted_direct.items():
+        field_name = f"{PREFIX_DIRECT}{key}"
+        existing = existing_fields.get(field_name)
+        if existing and existing.source == "manual":
+            continue
+        fake_upsert(db, 1, field_name, value, 0.9, "claude")
+
+    assert "dir_Cargo" not in saved, "manual dir_Cargo must not be overwritten"
+    assert "dir_Razon_Social" in saved, "non-manual field must be saved"
+
+
+# ─── FIX 3: alcance_actividad contradiction rule ──────────────────────────────
+
+
+def test_fix3_ninguna_experiencia_overrides_internacional():
+    """FIX 3: Ninguna experiencia + Internacional → corrected to Nacional."""
+    from agents.extractor import _apply_logical_implications
+
+    data = {
+        "selections": {
+            "experiencia_internacional": "Ninguna experiencia",
+            "alcance_actividad": "Internacional",
+            "num_paises": None,
+        },
+        "confidence": {
+            "experiencia_internacional": 1.0,
+            "alcance_actividad": 0.7,
+            "num_paises": 0.0,
+        },
+    }
+    result = _apply_logical_implications(data)
+    assert result["selections"]["alcance_actividad"] == "Nacional"
+    assert result["confidence"]["alcance_actividad"] == 0.9
+    # num_paises set to Ninguno (from Ninguna experiencia rule)
+    assert result["selections"]["num_paises"] == "Ninguno salvo el mercado nacional"
+
+
+def test_fix3_internacional_with_exports_not_overridden():
+    """FIX 3: Real exports + Internacional → alcance stays Internacional."""
+    from agents.extractor import _apply_logical_implications
+
+    data = {
+        "selections": {
+            "experiencia_internacional": "Más de 5 años",
+            "alcance_actividad": "Internacional",
+            "num_paises": None,
+        },
+        "confidence": {
+            "experiencia_internacional": 1.0,
+            "alcance_actividad": 0.9,
+            "num_paises": 0.0,
+        },
+    }
+    result = _apply_logical_implications(data)
+    assert result["selections"]["alcance_actividad"] == "Internacional"

@@ -485,12 +485,17 @@ async def process_document(
 
         extracted = extract_dpi_fields(text, transcript_text)  # CAMBIO 2
 
-        # Persist direct fields
+        # Persist direct fields — skip fields already entered manually (FIX 2)
+        existing_fields = {f.field_name: f for f in crud.get_fields(db, document_id)}
         for key, value in extracted.get("direct_fields", {}).items():
+            field_name = f"{PREFIX_DIRECT}{key}"
+            existing = existing_fields.get(field_name)
+            if existing and existing.source == "manual":
+                continue  # don't overwrite manually entered values
             crud.upsert_field(
                 db,
                 document_id,
-                f"{PREFIX_DIRECT}{key}",
+                field_name,
                 value,
                 confidence=0.9,
                 source="claude",

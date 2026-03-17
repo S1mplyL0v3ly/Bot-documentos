@@ -212,14 +212,31 @@ async def _bg_process_wa_text(sender: str, text: str) -> None:
         has_consultor = any(f.field_name == "dir_Nombre_realizador" for f in fields)
         has_cargo = any(f.field_name == "dir_Cargo" for f in fields)
         if not has_consultor:
+            # FIX 1: split "Nombre, DD/MM/YYYY" into name + date
+            if "," in text:
+                parts = text.split(",", 1)
+                nombre_part = parts[0].strip()
+                fecha_part = parts[1].strip()
+            else:
+                nombre_part = text.strip()
+                fecha_part = ""
             crud.upsert_field(
                 db,
                 waiting_doc.id,
                 "dir_Nombre_realizador",
-                text,
+                nombre_part,
                 confidence=1.0,
                 source="manual",
             )
+            if fecha_part:
+                crud.upsert_field(
+                    db,
+                    waiting_doc.id,
+                    "dir_Reunion_Inicial",
+                    fecha_part,
+                    confidence=1.0,
+                    source="manual",
+                )
             await send_text(
                 sender,
                 "✅ *Guardado.*\n\n"
