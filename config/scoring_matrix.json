@@ -1,0 +1,282 @@
+{
+  "_comment": "DPI Canarias — scoring matrix. Max total: 65 pts.",
+  "max_total": 65,
+  "blocks": [
+    {
+      "name": "Económico",
+      "max": 15,
+      "criteria": [
+        {
+          "key": "situacion_empresa",
+          "options": [
+            {
+              "label": "No constituida",
+              "score": 0
+            },
+            {
+              "label": "Menos de 2 años",
+              "score": 2
+            },
+            {
+              "label": "Más de 2 años",
+              "score": 5
+            }
+          ]
+        },
+        {
+          "key": "num_empleados",
+          "options": [
+            {
+              "label": "Menos de 2",
+              "score": 1
+            },
+            {
+              "label": "Más de 2",
+              "score": 5
+            }
+          ]
+        },
+        {
+          "key": "facturacion",
+          "options": [
+            {
+              "label": "Menos de 200.000 €",
+              "score": 1
+            },
+            {
+              "label": "Entre 200.000 y 500.000 €",
+              "score": 2
+            },
+            {
+              "label": "Entre 500.000 y 1.000.000 €",
+              "score": 4
+            },
+            {
+              "label": "Más de 1.000.000 €",
+              "score": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Internacional",
+      "max": 35,
+      "criteria": [
+        {
+          "key": "experiencia_internacional",
+          "options": [
+            {
+              "label": "Ninguna experiencia",
+              "score": 0
+            },
+            {
+              "label": "Menos de 3 años",
+              "score": 4
+            },
+            {
+              "label": "Más de 5 años",
+              "score": 10
+            }
+          ]
+        },
+        {
+          "key": "alcance_actividad",
+          "options": [
+            {
+              "label": "Insular",
+              "score": 0
+            },
+            {
+              "label": "Nacional",
+              "score": 3
+            },
+            {
+              "label": "Internacional",
+              "score": 6
+            }
+          ]
+        },
+        {
+          "key": "evolucion_facturacion",
+          "options": [
+            {
+              "label": "En decrecimiento",
+              "score": 0
+            },
+            {
+              "label": "Se mantiene estable",
+              "score": 3
+            },
+            {
+              "label": "En crecimiento",
+              "score": 6
+            }
+          ]
+        },
+        {
+          "key": "involuccion_gerencia",
+          "options": [
+            {
+              "label": "Sin participación alguna",
+              "score": 0
+            },
+            {
+              "label": "Escasamente involucrados",
+              "score": 1
+            },
+            {
+              "label": "Medianamente involucrados",
+              "score": 3
+            },
+            {
+              "label": "Directamente involucrados",
+              "score": 5
+            }
+          ]
+        },
+        {
+          "key": "adaptacion_demanda",
+          "options": [
+            {
+              "label": "Baja",
+              "score": 0
+            },
+            {
+              "label": "Media",
+              "score": 2
+            },
+            {
+              "label": "Alta",
+              "score": 4
+            }
+          ]
+        },
+        {
+          "key": "adaptacion_producto",
+          "options": [
+            {
+              "label": "Baja",
+              "score": 0
+            },
+            {
+              "label": "Media",
+              "score": 1
+            },
+            {
+              "label": "Alta",
+              "score": 2
+            }
+          ]
+        },
+        {
+          "key": "num_paises",
+          "options": [
+            {
+              "label": "Ninguno salvo el mercado nacional",
+              "score": 0
+            },
+            {
+              "label": "De 1 a 5",
+              "score": 1
+            },
+            {
+              "label": "Más de 5",
+              "score": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Digitalización",
+      "max": 15,
+      "criteria": [
+        {
+          "key": "tiene_web",
+          "options": [
+            {
+              "label": "No",
+              "score": 0
+            },
+            {
+              "label": "Si",
+              "score": 3
+            }
+          ]
+        },
+        {
+          "key": "ecommerce",
+          "options": [
+            {
+              "label": "Sin tienda web",
+              "score": 1
+            },
+            {
+              "label": "Tienda web propia con ventas bajas o irregulares",
+              "score": 2
+            },
+            {
+              "label": "Tienda web propia con ventas regulares a nivel nacional",
+              "score": 4
+            },
+            {
+              "label": "Tienda web propia con ventas internacionales",
+              "score": 6
+            }
+          ]
+        },
+        {
+          "key": "mercados_electronicos",
+          "options": [
+            {
+              "label": "Sin presencia en mercados electrónicos",
+              "score": 0
+            },
+            {
+              "label": "Con presencia en mercados electrónicos sin ventas o ventas bajas.",
+              "score": 1
+            },
+            {
+              "label": "Con presencia en mercados electrónicos con ventas internacionales",
+              "score": 4
+            }
+          ]
+        },
+        {
+          "key": "redes_sociales",
+          "options": [
+            {
+              "label": "Redes sociales inactivas o con bajo uso",
+              "score": 0
+            },
+            {
+              "label": "Redes sociales activas y planificadas",
+              "score": 1
+            },
+            {
+              "label": "Redes sociales activas y con generación de ventas",
+              "score": 2
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "non_scoring_criteria": [
+    {
+      "key": "recursos_internacionalizacion",
+      "options": [
+        "No",
+        "Sí"
+      ]
+    },
+    {
+      "key": "personal_dedicado",
+      "options": [
+        "No",
+        "Sí"
+      ]
+    }
+  ]
+}
