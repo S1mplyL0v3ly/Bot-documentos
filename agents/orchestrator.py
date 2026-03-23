@@ -3,7 +3,6 @@
 import json
 import re
 import sqlite3
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -23,6 +22,7 @@ from scoring_engine import (
 )
 from agents.web_scraper import find_best_candidate
 from config import JARVIS_DB_PATH, settings
+from utils.dq_adapter import call_llm
 from database import crud
 from database.models import Document
 from docx_generator.template_handler import render_template
@@ -130,19 +130,6 @@ def _log_to_jarvis(success: bool, document_id: int, notes: str = "") -> None:
             )
     except sqlite3.Error:
         pass
-
-
-def _run_claude(prompt: str) -> str:
-    """Execute Claude headless."""
-    result = subprocess.run(
-        ["claude", "-p", prompt, "--model", settings.claude_model],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=settings.claude_timeout,
-        cwd=str(Path(__file__).resolve().parent.parent),
-    )
-    return result.stdout.strip()
 
 
 def _parse_json(raw: str) -> dict:
@@ -676,7 +663,7 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
         )
     context = "\n".join(context_parts) if context_parts else "No especificado"
 
-    raw = _run_claude(DRAFT_PROMPT.format(profile=profile, context=context))
+    raw = call_llm(DRAFT_PROMPT.format(profile=profile, context=context), tier=2)
     draft = _parse_json(raw)
 
     if not draft:
@@ -776,7 +763,7 @@ async def apply_draft_changes(db: Session, document_id: int, changes_text: str) 
         "Genera el borrador REVISADO con los cambios aplicados. "
         "Responde ÚNICAMENTE con JSON con las mismas claves que el borrador actual."
     )
-    raw = _run_claude(revision_prompt)
+    raw = call_llm(revision_prompt, tier=2)
     revised = _parse_json(raw)
 
     if not revised:

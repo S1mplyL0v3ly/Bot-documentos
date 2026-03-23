@@ -2,13 +2,13 @@
 
 import json
 import re
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from config import settings
 from scoring_engine import CRITERION_OPTIONS
+from utils.dq_adapter import call_llm
 
 CURRENT_YEAR = datetime.now().year
 
@@ -217,19 +217,6 @@ DOCUMENTO:
 """
 
 CONFIDENCE_THRESHOLD = 0.7
-
-
-def run_claude(prompt: str) -> str:
-    """Execute Claude headless and return stdout."""
-    result = subprocess.run(
-        ["claude", "-p", prompt, "--model", settings.claude_model],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=settings.claude_timeout,
-        cwd=str(Path(__file__).resolve().parent.parent),
-    )
-    return result.stdout.strip()
 
 
 _GOOGLE_FORMS_ORANGE = (0.702, 0.4275, 0)  # stroke color of selected radio button
@@ -712,7 +699,7 @@ def extract_dpi_fields(cuestionario_text: str, transcript_text: str = "") -> dic
             f"{extract_relevant_sections(transcript_text, 12000)}"
         )
     prompt = EXTRACTOR_PROMPT.format(text=combined)
-    raw = run_claude(prompt)
+    raw = call_llm(prompt, tier=2)
     data = _parse_json_response(raw)
 
     if not data:

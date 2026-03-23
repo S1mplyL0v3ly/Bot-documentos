@@ -1,10 +1,9 @@
 """Document type classifier using Claude headless."""
 
 import json
-import subprocess
-from pathlib import Path
 
 from config import settings
+from utils.dq_adapter import call_llm
 
 CLASSIFIER_PROMPT = """Analiza el siguiente texto extraído de un documento y determina:
 1. Tipo de documento (factura, contrato, informe, formulario, certificado, otro)
@@ -21,19 +20,6 @@ Texto del documento:
 """
 
 
-def run_claude(prompt: str) -> str:
-    """Execute Claude headless and return stdout."""
-    result = subprocess.run(
-        ["claude", "-p", prompt, "--model", settings.claude_model],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=settings.claude_timeout,
-        cwd=str(Path(__file__).resolve().parent.parent),
-    )
-    return result.stdout.strip()
-
-
 def classify_document(text: str) -> dict:
     """Classify a document and return its type and expected fields.
 
@@ -44,7 +30,7 @@ def classify_document(text: str) -> dict:
         dict with keys: document_type, expected_fields, confidence
     """
     prompt = CLASSIFIER_PROMPT + text[:4000]  # limitar contexto
-    raw = run_claude(prompt)
+    raw = call_llm(prompt, tier=2)
 
     try:
         return json.loads(raw)

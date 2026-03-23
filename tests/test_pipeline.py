@@ -29,7 +29,7 @@ def test_classifier_identifies_document_type():
             "confidence": 0.95,
         }
     )
-    with patch("agents.classifier.run_claude", return_value=fake_response):
+    with patch("agents.classifier.call_llm", return_value=fake_response):
         result = classify_document(sample_text)
 
     assert result["document_type"] == "factura"
@@ -99,7 +99,7 @@ def test_extractor_returns_json_with_fields():
         }
     )
 
-    with patch("agents.extractor.run_claude", return_value=fake_response):
+    with patch("agents.extractor.call_llm", return_value=fake_response):
         result = extract_dpi_fields(text)
 
     assert result["direct_fields"]["Razon_Social"] == "Tech SL"
@@ -311,7 +311,7 @@ def test_extractor_maps_facturacion_correctly():
             "confidence": {**null_conf, "facturacion": 0.9},
         }
     )
-    with patch("agents.extractor.run_claude", return_value=fake_response):
+    with patch("agents.extractor.call_llm", return_value=fake_response):
         result = extract_dpi_fields(text)
     assert result["selections"]["facturacion"] == "Menos de 200.000 €"
 
@@ -361,7 +361,7 @@ def test_extractor_deduces_situacion_from_year():
             "confidence": null_conf,
         }
     )
-    with patch("agents.extractor.run_claude", return_value=fake_response):
+    with patch("agents.extractor.call_llm", return_value=fake_response):
         result = extract_dpi_fields(text)
     assert result["selections"]["situacion_empresa"] == "Más de 2 años"
     assert result["confidence"]["situacion_empresa"] >= 0.9
@@ -436,7 +436,7 @@ def test_extractor_atelier_maria():
         }
     )
 
-    with patch("agents.extractor.run_claude", return_value=fake_response):
+    with patch("agents.extractor.call_llm", return_value=fake_response):
         result = extract_dpi_fields(text)
 
     # Normalización de facturación
