@@ -2,12 +2,13 @@
 
 Flow:
   1. search_company_urls() — DuckDuckGo search, returns ranked URL candidates
-  2. scrape_url() — httpx GET with 8s timeout, returns HTML (fails silently)
+  2. _scrape_one_async() — httpx async GET, returns (url, html|None)
   3. _score_url_match() — 0.0–1.0 confidence that URL belongs to the company
   4. _build_dpi_from_web() — extract DPI signals from scraped content
-  5. find_best_candidate() — orchestrate 1-4 and return best result dict
+  5. find_best_candidate() — orchestrate 1-4 async/parallel, return best result dict
 """
 
+import asyncio
 import json
 import re
 import unicodedata
@@ -77,28 +78,48 @@ def _tokenize(text: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def search_company_urls(company_name: str, max_results: int = 6) -> list[str]:
-    """Return up to max_results candidate URLs via DuckDuckGo (no API key needed).
-
-    Falls back to empty list on any error (no exceptions propagated).
-    """
+def _ddgs_search_one(query: str, max_results: int) -> list[str]:
+    """Run one DDGS text search synchronously — called via asyncio.to_thread."""
     try:
         from duckduckgo_search import DDGS  # type: ignore
 
-        queries = [
-            f'"{company_name}" site web oficial',
-            f"{company_name} empresa Canarias",
-        ]
-        seen: list[str] = []
         with DDGS() as ddgs:
-            for q in queries:
-                for r in ddgs.text(q, max_results=max_results // len(queries) + 2):
-                    href = r.get("href", "")
-                    if href and href not in seen:
-                        seen.append(href)
-                    if len(seen) >= max_results:
-                        return seen
-        return seen
+            return [
+                r.get("href", "")
+                for r in ddgs.text(query, max_results=max_results)
+                if r.get("href")
+            ]
+    except Exception:
+        return []
+
+
+async def _search_company_urls_async(
+    company_name: str, max_results: int = 6
+) -> list[str]:
+    """Run 2 DDGS queries in parallel, deduplicate, return up to max_results URLs."""
+    queries = [
+        f'"{company_name}" site web oficial',
+        f"{company_name} empresa Canarias",
+    ]
+    per_query = max_results // len(queries) + 2
+    results = await asyncio.gather(
+        asyncio.to_thread(_ddgs_search_one, queries[0], per_query),
+        asyncio.to_thread(_ddgs_search_one, queries[1], per_query),
+    )
+    seen: list[str] = []
+    for batch in results:
+        for url in batch:
+            if url and url not in seen:
+                seen.append(url)
+            if len(seen) >= max_results:
+                return seen
+    return seen
+
+
+def search_company_urls(company_name: str, max_results: int = 6) -> list[str]:
+    """Return up to max_results candidate URLs (runs 2 DuckDuckGo queries in parallel)."""
+    try:
+        return asyncio.run(_search_company_urls_async(company_name, max_results))
     except Exception:
         return []
 
@@ -108,22 +129,17 @@ def search_company_urls(company_name: str, max_results: int = 6) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def scrape_url(url: str) -> Optional[str]:
-    """GET url with 8s timeout. Returns HTML string or None on failure."""
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (compatible; AutoreporteBot/1.0; +https://canariasexpande.es)"
-        )
-    }
+async def _scrape_one_async(
+    client: httpx.AsyncClient, url: str
+) -> tuple[str, str | None]:
+    """Scrape a single URL asynchronously, return (url, html|None)."""
     try:
-        resp = httpx.get(
-            url, headers=headers, timeout=_HTTP_TIMEOUT, follow_redirects=True
-        )
+        resp = await client.get(url, timeout=_HTTP_TIMEOUT, follow_redirects=True)
         if resp.status_code == 200:
-            return resp.text
+            return url, resp.text
     except Exception:
         pass
-    return None
+    return url, None
 
 
 # ---------------------------------------------------------------------------
@@ -264,50 +280,54 @@ def search_cif_ddg(company_name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def find_best_candidate(
+async def find_best_candidate(
     company_name: str,
-    cache: Optional[dict] = None,
+    cache: dict | None = None,
 ) -> dict:
-    """Search, scrape and score URLs for company_name.
+    """Search, scrape and score URLs for company_name (async, parallel).
 
-    Args:
-        company_name: Name from cuestionario Q1.
-        cache: Previously stored search cache (skip search if set).
+    Async because it is called from trigger_web_search() which is async.
+    Using asyncio.run() inside an async context raises RuntimeError.
 
     Returns:
         {
-            "url": str | None,         # best candidate URL
-            "score": float,            # match confidence (0–1)
-            "dpi_signals": dict,       # DPI selections/direct_fields extracted
-            "search_cache": dict,      # raw search results for DB storage
+            "url": str | None,
+            "score": float,
+            "dpi_signals": dict,
+            "search_cache": dict,
         }
     """
     if cache:
         urls = cache.get("urls", [])
     else:
-        urls = search_company_urls(company_name)
+        urls = await _search_company_urls_async(company_name)
 
     search_cache = {"urls": urls}
 
-    best_url: Optional[str] = None
+    best_url: str | None = None
     best_score: float = 0.0
-    best_html: Optional[str] = None
+    best_html: str | None = None
 
-    for url in urls:
-        html = scrape_url(url)
-        score = _score_url_match(url, html or "", company_name)
-        if score > best_score:
-            best_score = score
-            best_url = url
-            best_html = html
+    if urls:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; AutoreporteBot/1.0)"}
+        async with httpx.AsyncClient(headers=headers) as client:
+            scrape_results = await asyncio.gather(
+                *[_scrape_one_async(client, url) for url in urls]
+            )
+        for url, html in scrape_results:
+            score = _score_url_match(url, html or "", company_name)
+            if score > best_score:
+                best_score = score
+                best_url = url
+                best_html = html
 
     dpi_signals: dict = {}
     if best_url and best_score >= _MIN_SCORE and best_html:
         dpi_signals = _build_dpi_from_web(best_url, best_html)
 
-    # CIF fallback: if not found in scraped HTML, try DDG snippet search
+    # CIF fallback (still sync — run in thread to avoid blocking event loop)
     if not dpi_signals.get("direct_fields", {}).get("CIF"):
-        cif = search_cif_ddg(company_name)
+        cif = await asyncio.to_thread(search_cif_ddg, company_name)
         if cif:
             dpi_signals.setdefault("direct_fields", {})["CIF"] = cif
             dpi_signals.setdefault("confidence", {})["CIF"] = 0.7

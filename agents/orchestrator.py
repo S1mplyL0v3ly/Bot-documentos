@@ -189,7 +189,7 @@ async def trigger_web_search(db: Session, document_id: int) -> dict:
         except Exception:
             pass
 
-    result = find_best_candidate(empresa_name, cache=cache)
+    result = await find_best_candidate(empresa_name, cache=cache)
 
     # Persist search cache
     if doc:
