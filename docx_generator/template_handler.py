@@ -14,7 +14,7 @@ from docx import Document
 from docx.oxml.ns import qn
 
 from config import BASE_DIR, TEMPLATES_DIR
-from scoring_engine import SCORE_MAP
+from scoring_engine import CRITERION_OPTIONS, SCORE_MAP
 
 OUTPUT_DIR = BASE_DIR / "outputs"
 DEFAULT_TEMPLATE = TEMPLATES_DIR / "plantilla.docx"
@@ -98,6 +98,48 @@ def _write_score_values(doc: Document, selections: dict[str, str | None]) -> Non
         selected = selections.get(criterion)
         score = SCORE_MAP.get(criterion, {}).get(selected, 0) if selected else 0
         _set_cell_text(cells[1], str(score))
+
+
+# Criteria that belong to each template block (by visual position in the DOCX,
+# independent of the scoring_matrix.json block assignment).
+# Row 5  = Bloque 1 subtotal, Row 31 = Bloque 2, Row 68 = Bloque 3.
+_BLOCK_SUBTOTAL_ROWS: dict[int, list[str]] = {
+    5: ["situacion_empresa", "num_empleados", "facturacion", "evolucion_facturacion"],
+    31: [
+        "experiencia_internacional",
+        "alcance_actividad",
+        "num_paises",
+        "involuccion_gerencia",
+        "adaptacion_demanda",
+        "adaptacion_producto",
+    ],
+    68: ["tiene_web", "ecommerce", "mercados_electronicos", "redes_sociales"],
+}
+
+
+def _write_totals(doc: Document, selections: dict[str, str | None]) -> None:
+    """Write block subtotals (rows 5, 31, 68) and DPI total (rows 0-1) into table[1]."""
+    if len(doc.tables) < 2:
+        return
+    table = doc.tables[1]
+    rows = table.rows
+    n_rows = len(rows)
+
+    def _score(criterion: str) -> int:
+        val = selections.get(criterion)
+        return SCORE_MAP.get(criterion, {}).get(val, 0) if val else 0
+
+    grand_total = 0
+    for subtotal_row, criteria in _BLOCK_SUBTOTAL_ROWS.items():
+        block_sum = sum(_score(c) for c in criteria)
+        grand_total += block_sum
+        if subtotal_row < n_rows and len(rows[subtotal_row].cells) >= 2:
+            _set_cell_text(rows[subtotal_row].cells[1], str(block_sum))
+
+    # DPI total into the two header rows (0 and 1)
+    for row_idx in (0, 1):
+        if row_idx < n_rows and len(rows[row_idx].cells) >= 2:
+            _set_cell_text(rows[row_idx].cells[1], str(grand_total))
 
 
 # Placeholder keys in table[1] header rows that must be cleared to "".
@@ -257,17 +299,23 @@ def _apply_dpi_options(doc: Document, selections: dict[str, str | None]) -> None
             if _normalize_text(cell.text) in _VALORAR_NORMS:
                 _set_cell_text(cell, "")
 
-    # Step 2: Per-criterion option row processing — text-only.
+    # Step 2: Per-criterion option row processing — write numeric score per option.
     for criterion, option_rows in _OPTION_MAP.items():
-        for row_idx in option_rows:
+        # Get ordered option labels from scoring map (preserves matrix order)
+        option_labels = list(SCORE_MAP.get(criterion, {}).keys())
+        for j, row_idx in enumerate(option_rows):
             if row_idx >= n_rows:
                 continue
             row_cells = rows[row_idx].cells
             if len(row_cells) < 2:
                 continue
 
-            # Always clear col[1] (may hold {{VALOR_CONSTITUCION}} etc.)
-            _set_cell_text(row_cells[1], "")
+            if j < len(option_labels):
+                score = SCORE_MAP[criterion][option_labels[j]]
+                _set_cell_text(row_cells[1], str(score))
+            else:
+                # Non-scoring option row (recursos_economicos, personal_internacionalizacion)
+                _set_cell_text(row_cells[1], "")
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -344,8 +392,9 @@ def render_template(
     }
 
     _apply_direct_fields_to_paragraphs(doc, direct_fields)
-    _apply_dpi_options(doc, selections)  # clear [Valorar] placeholders (text-only)
-    _write_score_values(doc, selections)  # write numeric scores into golden cells
+    _apply_dpi_options(doc, selections)  # write numeric scores for option rows
+    _write_score_values(doc, selections)  # write selected score in golden cells
+    _write_totals(doc, selections)  # block subtotals + DPI total
     _apply_dafo_direct(doc, free_texts)  # positional fill (BUG 3)
     _apply_free_texts_to_paragraphs(
         doc, free_texts
