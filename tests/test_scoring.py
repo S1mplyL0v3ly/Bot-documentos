@@ -95,14 +95,14 @@ def test_all_max_scores_sum_correctly():
 
 
 def test_all_zero_scores():
-    """A selection of min options for every criterion must yield the minimum (3)."""
+    """A selection of min options for every criterion must yield the minimum (4)."""
     from scoring_engine import SCORE_MAP, calculate_dpi_score
 
     worst = {k: min(v, key=v.get) for k, v in SCORE_MAP.items()}
     result = calculate_dpi_score(worst)
     assert (
-        result["total"] == 3
-    )  # num_empleados min=1, facturacion min=1, ecommerce min=1
+        result["total"] == 4
+    )  # num_empleados=1, facturacion=1, alcance_actividad=1, ecommerce=1
 
 
 def test_unknown_value_scores_zero_not_raises():
