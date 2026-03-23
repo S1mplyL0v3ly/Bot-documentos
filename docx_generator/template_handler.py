@@ -213,16 +213,22 @@ def _replace_in_paragraph(paragraph, replacements: dict[str, str]) -> None:
 
 
 def _replace_marker_in_paragraph(paragraph, free_texts: dict[str, str]) -> None:
-    """Replace [Poner texto] / [Redactar] markers with free text content."""
+    """Replace [Poner texto] / [Redactar] markers with free text content.
+
+    Replaces the *entire* paragraph text with the replacement value to prevent
+    heading-text concatenation when the marker is embedded in a labelled paragraph.
+    """
     full_text = paragraph.text
-    new_text = full_text
     for marker, key in FREE_TEXT_MARKERS.items():
-        if marker in new_text and key in free_texts:
-            new_text = new_text.replace(marker, free_texts[key] or "")
-    if new_text != full_text and paragraph.runs:
-        paragraph.runs[0].text = new_text
-        for run in paragraph.runs[1:]:
-            run.text = ""
+        if marker in full_text and key in free_texts:
+            replacement = free_texts[key] or ""
+            if paragraph.runs:
+                paragraph.runs[0].text = replacement
+                for run in paragraph.runs[1:]:
+                    run.text = ""
+            else:
+                paragraph.add_run(replacement)
+            return  # one marker per paragraph is enough
 
 
 def _iter_all_paragraphs(doc: Document):
@@ -248,6 +254,32 @@ def _apply_free_texts_to_paragraphs(doc: Document, free_texts: dict[str, str]) -
     for paragraph in _iter_all_paragraphs(doc):
         _replace_marker_in_paragraph(paragraph, free_texts)  # BUG 4 fix
         _replace_in_paragraph(paragraph, dafo_replacements)  # {{dafo_*}} fallback
+
+
+def _clean_corrupted_headings(doc: Document) -> None:
+    """Remove text that leaked into section headings from previous marker replacements.
+
+    The 'Conclusiones de análisis' heading may have accumulated extra text
+    (e.g. 'egia en tres pilares inmediatos:') if a previous run embedded
+    [Redactar] inside the heading paragraph. This pass resets it to the
+    canonical heading text.
+    """
+    _HEADING_CANONICAL: dict[str, str] = {
+        "conclusiones de analisis": "Conclusiones de análisis",
+    }
+    for paragraph in doc.paragraphs:
+        if "Heading" not in paragraph.style.name:
+            continue
+        norm = unicodedata.normalize("NFKD", paragraph.text.strip().lower())
+        norm = "".join(c for c in norm if not unicodedata.combining(c))
+        for prefix, canonical in _HEADING_CANONICAL.items():
+            if norm.startswith(prefix) and norm != prefix:
+                # Heading has extra trailing text — reset to canonical
+                if paragraph.runs:
+                    paragraph.runs[0].text = canonical
+                    for run in paragraph.runs[1:]:
+                        run.text = ""
+                break
 
 
 def _find_dafo_table(doc: Document):
@@ -391,6 +423,7 @@ def render_template(
         k: (v or "") for k, v in data.get("free_texts", {}).items()
     }
 
+    _clean_corrupted_headings(doc)  # reset headings with leaked text
     _apply_direct_fields_to_paragraphs(doc, direct_fields)
     _apply_dpi_options(doc, selections)  # write numeric scores for option rows
     _write_score_values(doc, selections)  # write selected score in golden cells
