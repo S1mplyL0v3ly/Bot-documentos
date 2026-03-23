@@ -176,10 +176,10 @@ def test_docx_generator_creates_file(tmp_path):
 
 
 def test_render_template_marks_selection_green(tmp_path):
-    """Selected option cell must receive green fill (#92D050), others untouched."""
+    """render_template must not add green fill (70AD47) to any cell — template formatting is preserved via binary copy."""
     from docx import Document
     from docx.oxml.ns import qn
-    from docx_generator.template_handler import GREEN_FILL, render_template
+    from docx_generator.template_handler import render_template
 
     template = Document()
     tbl = template.add_table(rows=3, cols=1)
@@ -203,23 +203,17 @@ def test_render_template_marks_selection_green(tmp_path):
         output = render_template(document_id=2, data=data)
 
     doc = Document(str(output))
-    cells = doc.tables[0].columns[0].cells
-
-    def get_fill(cell) -> str:
-        shd = cell._tc.find(f".//{{{qn('w:shd').split('}')[0][1:]}}}shd")
-        if shd is None:
-            # Try direct child
-            tcPr = cell._tc.find(qn("w:tcPr"))
-            if tcPr is None:
-                return ""
-            shd = tcPr.find(qn("w:shd"))
-        return (shd.get(qn("w:fill")) or "") if shd is not None else ""
-
-    selected_fill = get_fill(cells[2])  # "Más de 2 años"
-    other_fill = get_fill(cells[0])  # "No constituida"
-
-    assert selected_fill.upper() == GREEN_FILL.upper()
-    assert other_fill.upper() != GREEN_FILL.upper()
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                tcPr = cell._tc.find(qn("w:tcPr"))
+                if tcPr is not None:
+                    shd = tcPr.find(qn("w:shd"))
+                    if shd is not None:
+                        fill = shd.get(qn("w:fill"), "")
+                        assert (
+                            fill.upper() != "70AD47"
+                        ), f"Programmatic green fill found in cell: '{cell.text}'"
 
 
 # ─── Validator ────────────────────────────────────────────────────────────────
@@ -858,10 +852,10 @@ def test_search_cif_ddg_returns_none_on_exception():
 
 
 def test_template_green_cells_and_no_valorar():
-    """render_template marks selected option green and clears all [Valorar] / {{valorar}}."""
-    import tempfile
-    from pathlib import Path
-    from docx_generator.template_handler import render_template, GREEN_FILL
+    """render_template clears all [Valorar] / {{valorar}} and does not add green fill (70AD47)."""
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx_generator.template_handler import render_template
 
     data = {
         "direct_fields": {"Razon_Social": "Test SL"},
@@ -882,45 +876,20 @@ def test_template_green_cells_and_no_valorar():
     output_path = render_template(document_id=9999, data=data, empresa_name="TestSL")
     assert output_path.exists()
 
-    from docx import Document
-
     doc = Document(str(output_path))
     table = doc.tables[1]
 
-    def get_fill(cell):
-        tc = cell._tc
-        tcPr = tc.find(
-            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tcPr"
-        )
-        if tcPr is None:
-            return None
-        shd = tcPr.find(
-            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd"
-        )
-        if shd is None:
-            return None
-        return shd.get(
-            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fill"
-        )
-
-    # 1. Selected option rows must be green in both col[0] and col[1]
-    green_rows = {
-        9: "Más de 2 años",
-        13: "Más de 2",
-        16: "Menos de 200.000 €",
-        24: "En crecimiento",
-        33: "Ninguna experiencia",  # cell text (bidirectional match)
-        39: "Nacional",
-        71: "Si",
-        74: "Tienda web propia con ventas bajas o irregulares",
-        86: "Redes sociales activas y planificadas",
-    }
-    for row_idx, label in green_rows.items():
-        row = table.rows[row_idx]
-        fill0 = get_fill(row.cells[0])
-        fill1 = get_fill(row.cells[1])
-        assert fill0 == GREEN_FILL, f"row {row_idx} ({label}) col[0] not green: {fill0}"
-        assert fill1 == GREEN_FILL, f"row {row_idx} ({label}) col[1] not green: {fill1}"
+    # 1. No cell should have programmatic green fill (70AD47)
+    for row in table.rows:
+        for cell in row.cells:
+            tcPr = cell._tc.find(qn("w:tcPr"))
+            if tcPr is not None:
+                shd = tcPr.find(qn("w:shd"))
+                if shd is not None:
+                    fill = shd.get(qn("w:fill"), "")
+                    assert (
+                        fill.upper() != "70AD47"
+                    ), f"Programmatic green fill found in cell: '{cell.text}'"
 
     # 2. No cell in table[1] should contain [Valorar] or {{valorar}} text
     for r_idx, row in enumerate(table.rows):

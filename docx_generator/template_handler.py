@@ -5,19 +5,19 @@ render_template() always reads the original and writes a NEW file to outputs/.
 """
 
 import re
+import shutil
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 from docx import Document
-from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from config import BASE_DIR, TEMPLATES_DIR
+from scoring_engine import SCORE_MAP
 
 OUTPUT_DIR = BASE_DIR / "outputs"
 DEFAULT_TEMPLATE = TEMPLATES_DIR / "plantilla.docx"
-GREEN_FILL = "70AD47"  # color celda seleccionada (verde DPI Canarias)
 
 # Markers en párrafos libres → clave en free_texts
 FREE_TEXT_MARKERS = {
@@ -70,6 +70,36 @@ _OPTION_MAP: dict[str, list[int]] = {
     "redes_sociales": [85, 86, 87],
 }
 
+# Indicator row = min(option_rows) - 1 for each criterion.
+# That row's col[1] already has #FFC000 background in the template.
+_INDICATOR_ROW_MAP: dict[str, int] = {
+    crit: min(rows) - 1 for crit, rows in _OPTION_MAP.items()
+}
+
+
+def _write_score_values(doc: Document, selections: dict[str, str | None]) -> None:
+    """Write the numeric score for each criterion into its pre-formatted golden cell.
+
+    The template already has #FFC000 background on table[1].rows[indicator_row].cells[1].
+    We only write the integer score string — never change background or font.
+    """
+    if len(doc.tables) < 2:
+        return
+    table = doc.tables[1]
+    rows = table.rows
+    n_rows = len(rows)
+
+    for criterion, indicator_row in _INDICATOR_ROW_MAP.items():
+        if indicator_row >= n_rows:
+            continue
+        cells = rows[indicator_row].cells
+        if len(cells) < 2:
+            continue
+        selected = selections.get(criterion)
+        score = SCORE_MAP.get(criterion, {}).get(selected, 0) if selected else 0
+        _set_cell_text(cells[1], str(score))
+
+
 # Placeholder keys in table[1] header rows that must be cleared to "".
 _DPI_TABLE_PLACEHOLDERS = (
     "VALOR_CONSTITUCION",
@@ -101,19 +131,6 @@ def _find_template(document_type: str = "default") -> Path:
         f"No template found in {TEMPLATES_DIR}. "
         "Upload a 'plantilla.docx' to /root/autoreporte/templates/"
     )
-
-
-def _set_cell_background(cell, color_hex: str) -> None:
-    """Apply XML shading to a table cell (background fill)."""
-    tc = cell._tc
-    tcPr = tc.get_or_add_tcPr()
-    for existing in tcPr.findall(qn("w:shd")):
-        tcPr.remove(existing)
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:val"), "clear")
-    shd.set(qn("w:color"), "auto")
-    shd.set(qn("w:fill"), color_hex.lstrip("#"))
-    tcPr.append(shd)
 
 
 def _set_cell_text(cell, text: str) -> None:
@@ -213,46 +230,14 @@ def _apply_dafo_direct(doc: Document, free_texts: dict[str, str]) -> None:
             _set_cell_text(rows[row_idx].cells[col_idx], value)
 
 
-def _apply_selections(doc: Document, selections: dict[str, str | None]) -> None:
-    """BUG 2 fix: Mark selected option cells green using accent-normalized comparison.
-
-    - Uses unicodedata normalization so 'Si' matches 'Sí'.
-    - Skips {{valorar}} / [Valorar] placeholder cells.
-    - Deduplicates merged cells via cell identity to avoid double-coloring.
-    """
-    normalized_selected: set[str] = {
-        _normalize_text(v) for v in selections.values() if v
-    }
-    if not normalized_selected:
-        return
-
-    for table in doc.tables:
-        for row in table.rows:
-            seen: set[int] = set()
-            for cell in row.cells:
-                cell_id = id(cell._tc)
-                if cell_id in seen:
-                    continue
-                seen.add(cell_id)
-
-                raw = cell.text.strip()
-                if not raw:
-                    continue
-                # Skip placeholder markers — not real option text
-                if _normalize_text(raw) in ("{{valorar}}", "[valorar]", "valorar"):
-                    continue
-                if _normalize_text(raw) in normalized_selected:
-                    _set_cell_background(cell, GREEN_FILL)
-
-
 def _apply_dpi_options(doc: Document, selections: dict[str, str | None]) -> None:
-    """Clear all [Valorar] placeholders and mark selected option rows green.
+    """Clear all [Valorar] placeholders and clear col[1] placeholder text for option rows.
 
     Step 1: Clear every cell in doc.tables[1] whose text is exactly '[Valorar]'
             or '{{valorar}}' (the block/criterion header cells).
     Step 2: For each criterion in _OPTION_MAP, clear col[1] for all option rows
-            (removes {{VALOR_CONSTITUCION}} etc.), then paint col[0]+col[1] green
-            for the row whose label matches the selected value (normalized).
+            (removes {{VALOR_CONSTITUCION}} etc.). No background changes — the
+            template's pre-existing formatting is preserved via shutil.copy2.
     """
     if len(doc.tables) < 2:
         return
@@ -272,11 +257,8 @@ def _apply_dpi_options(doc: Document, selections: dict[str, str | None]) -> None
             if _normalize_text(cell.text) in _VALORAR_NORMS:
                 _set_cell_text(cell, "")
 
-    # Step 2: Per-criterion option row processing.
+    # Step 2: Per-criterion option row processing — text-only.
     for criterion, option_rows in _OPTION_MAP.items():
-        selected = selections.get(criterion)
-        selected_norm = _normalize_text(selected) if selected else None
-
         for row_idx in option_rows:
             if row_idx >= n_rows:
                 continue
@@ -286,20 +268,6 @@ def _apply_dpi_options(doc: Document, selections: dict[str, str | None]) -> None
 
             # Always clear col[1] (may hold {{VALOR_CONSTITUCION}} etc.)
             _set_cell_text(row_cells[1], "")
-
-            if not selected_norm:
-                continue
-
-            cell_norm = _normalize_text(row_cells[0].text)
-            # Bidirectional containment handles minor wording differences
-            # e.g. "Ninguna" matches "Ninguna experiencia"
-            if (
-                cell_norm == selected_norm
-                or selected_norm in cell_norm
-                or cell_norm in selected_norm
-            ):
-                _set_cell_background(row_cells[0], GREEN_FILL)
-                _set_cell_background(row_cells[1], GREEN_FILL)
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -326,7 +294,20 @@ def render_template(
         Path to the generated DOCX file.
     """
     template_path = _find_template(document_type)
-    doc = Document(str(template_path))
+
+    # Build output filename — template original is NEVER touched
+    empresa_clean = re.sub(r"[^\w\s-]", "", empresa_name).strip()
+    empresa_clean = re.sub(r"\s+", " ", empresa_clean)
+    filename = (
+        f"Reporte {empresa_clean}.docx"
+        if empresa_clean
+        else f"Reporte {document_id}.docx"
+    )
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = OUTPUT_DIR / filename
+
+    shutil.copy2(template_path, output_path)
+    doc = Document(output_path)
 
     # BUG 1 fix: pass direct_fields as-is; _replace_in_paragraph handles case-insensitivity.
     # Add 'fecha' fallback (today's date) when the field is absent from the document.
@@ -363,23 +344,12 @@ def render_template(
     }
 
     _apply_direct_fields_to_paragraphs(doc, direct_fields)
-    _apply_dpi_options(doc, selections)  # positional green cells + clear [Valorar]
-    _apply_selections(doc, selections)  # legacy text-match fallback for other tables
+    _apply_dpi_options(doc, selections)  # clear [Valorar] placeholders (text-only)
+    _write_score_values(doc, selections)  # write numeric scores into golden cells
     _apply_dafo_direct(doc, free_texts)  # positional fill (BUG 3)
     _apply_free_texts_to_paragraphs(
         doc, free_texts
     )  # markers + {{dafo_*}} fallback (BUG 4)
 
-    # Build output filename — template original is NEVER touched
-    empresa_clean = re.sub(r"[^\w\s-]", "", empresa_name).strip()
-    empresa_clean = re.sub(r"\s+", " ", empresa_clean)
-    filename = (
-        f"Reporte {empresa_clean}.docx"
-        if empresa_clean
-        else f"Reporte {document_id}.docx"
-    )
-
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = OUTPUT_DIR / filename
-    doc.save(str(output_path))
+    doc.save(output_path)
     return output_path
