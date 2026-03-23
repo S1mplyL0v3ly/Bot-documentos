@@ -496,36 +496,38 @@ def test_approval_flow_generates_final_docx(tmp_path):
 
 
 def test_calculate_dpi_score_atelier_maria():
-    """calculate_dpi_score debe devolver puntuaciones correctas para Atelier Maria."""
+    """calculate_dpi_score debe devolver DPI=21 para el perfil de Atelier María Secretos."""
     from agents.orchestrator import calculate_dpi_score
 
     selections = {
-        "situacion_empresa": "Más de 2 años",
-        "num_empleados": "Más de 2",
-        "facturacion": "Menos de 200.000 €",
-        "evolucion_facturacion": "En crecimiento",
-        "experiencia_internacional": "Ninguna experiencia",
-        "alcance_actividad": "Nacional",
-        "num_paises": "Ninguno salvo el mercado nacional",
-        "involuccion_gerencia": "Directamente involucrados",
-        "adaptacion_demanda": "Media",
-        "adaptacion_producto": "Alta",
-        "tiene_web": "Si",
-        "ecommerce": "Sin tienda web",
-        "mercados_electronicos": "Con presencia en mercados electrónicos sin ventas o ventas bajas.",
-        "redes_sociales": "Redes sociales activas y planificadas",
+        # Bloque Económico: 2+1+1+3+1 = 8
+        "situacion_empresa": "Más de 2 años",  # 2
+        "num_empleados": "Menos de 2",  # 1
+        "facturacion": "Menos de 200.000 €",  # 1
+        "evolucion_facturacion": "En crecimiento",  # 3
+        "recursos_internacionalizacion": "Sí",  # 1
+        # Bloque Internacional: 0+1+0+0+3+2+2 = 8
+        "experiencia_internacional": "Ninguna experiencia",  # 0
+        "alcance_actividad": "Nacional",  # 1
+        "num_paises": "Ninguno salvo el mercado nacional",  # 0
+        "personal_dedicado": "No",  # 0
+        "involuccion_gerencia": "Directamente involucrados",  # 3
+        "adaptacion_demanda": "Alta",  # 2
+        "adaptacion_producto": "Alta",  # 2
+        # Bloque Digitalización: 1+2+0+2 = 5
+        "tiene_web": "Si",  # 1
+        "ecommerce": "Tienda web propia con ventas regulares a nivel nacional",  # 2
+        "mercados_electronicos": "Sin presencia en mercados electrónicos",  # 0
+        "redes_sociales": "Redes sociales activas y con generación de ventas",  # 2
     }
     score = calculate_dpi_score(selections)
 
-    # Económico: 5 (Más de 2 años) + 5 (Más de 2) + 1 (Menos de 200.000 €) = 11
-    assert score["scores"]["Económico"] == 11
-    # Internacional: 0 (Ninguna experiencia) + 3 (Nacional) + 6 (En crecimiento) + 5 (Directamente) + 2 (Media) + 2 (Alta) + 0 (Ninguno) = 18
-    assert score["scores"]["Internacional"] == 18
-    # Digitalización: 3 (Si) + 1 (Sin tienda) + 1 (Con presencia sin ventas) + 1 (Activas y planificadas) = 6
-    assert score["scores"]["Digitalización"] == 6
-    assert score["total"] == 35
-    assert score["max_total"] == 65
-    assert score["pct"] == 54  # round(35/65*100) = round(53.8) = 54
+    assert score["scores"]["Económico"] == 8
+    assert score["scores"]["Internacional"] == 8
+    assert score["scores"]["Digitalización"] == 5
+    assert score["total"] == 21
+    assert score["max_total"] == 35
+    assert score["pct"] == 60  # round(21/35*100) = 60
 
 
 def test_two_document_flow():

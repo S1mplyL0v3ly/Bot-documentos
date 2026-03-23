@@ -56,11 +56,11 @@ _OPTION_MAP: dict[str, list[int]] = {
     "num_empleados": [12, 13],
     "facturacion": [16, 17, 18, 19],
     "evolucion_facturacion": [22, 23, 24],
-    "recursos_economicos": [27, 28],
+    "recursos_internacionalizacion": [27, 28],
     "experiencia_internacional": [33, 34, 35],
     "alcance_actividad": [38, 39, 40],
     "num_paises": [43, 44, 45],
-    "personal_internacionalizacion": [48, 49],
+    "personal_dedicado": [48, 49],
     "involuccion_gerencia": [52, 53, 54, 55],
     "adaptacion_demanda": [58, 59, 60],
     "adaptacion_producto": [63, 64, 65],
@@ -104,11 +104,18 @@ def _write_score_values(doc: Document, selections: dict[str, str | None]) -> Non
 # independent of the scoring_matrix.json block assignment).
 # Row 5  = Bloque 1 subtotal, Row 31 = Bloque 2, Row 68 = Bloque 3.
 _BLOCK_SUBTOTAL_ROWS: dict[int, list[str]] = {
-    5: ["situacion_empresa", "num_empleados", "facturacion", "evolucion_facturacion"],
+    5: [
+        "situacion_empresa",
+        "num_empleados",
+        "facturacion",
+        "evolucion_facturacion",
+        "recursos_internacionalizacion",
+    ],
     31: [
         "experiencia_internacional",
         "alcance_actividad",
         "num_paises",
+        "personal_dedicado",
         "involuccion_gerencia",
         "adaptacion_demanda",
         "adaptacion_producto",
@@ -346,7 +353,6 @@ def _apply_dpi_options(doc: Document, selections: dict[str, str | None]) -> None
                 score = SCORE_MAP[criterion][option_labels[j]]
                 _set_cell_text(row_cells[1], str(score))
             else:
-                # Non-scoring option row (recursos_economicos, personal_internacionalizacion)
                 _set_cell_text(row_cells[1], "")
 
 

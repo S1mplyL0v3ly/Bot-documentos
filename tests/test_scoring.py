@@ -17,21 +17,23 @@ def test_scoring_matrix_loads():
     assert "max_total" in data
 
 
-def test_scoring_matrix_has_14_scoreable_criteria():
-    """All 14 scoreable DPI criteria must be present in the matrix."""
+def test_scoring_matrix_has_16_scoreable_criteria():
+    """All 16 scoreable DPI criteria must be present in the matrix."""
     from scoring_engine import SCORE_MAP
 
     expected = {
         "situacion_empresa",
         "num_empleados",
         "facturacion",
+        "evolucion_facturacion",
+        "recursos_internacionalizacion",
         "experiencia_internacional",
         "alcance_actividad",
-        "evolucion_facturacion",
+        "num_paises",
+        "personal_dedicado",
         "involuccion_gerencia",
         "adaptacion_demanda",
         "adaptacion_producto",
-        "num_paises",
         "tiene_web",
         "ecommerce",
         "mercados_electronicos",
@@ -50,11 +52,11 @@ def test_criterion_options_has_16_criteria():
     assert len(CRITERION_OPTIONS) == 16
 
 
-def test_max_score_is_65():
-    """Sum of all block maxes must equal 65."""
+def test_max_score_is_35():
+    """Sum of all block maxes must equal 35 (Eco 12 + Int 14 + Dig 9)."""
     from scoring_engine import BLOCKS_MAX
 
-    assert sum(BLOCKS_MAX.values()) == 65
+    assert sum(BLOCKS_MAX.values()) == 35
 
 
 # ─── Deterministic scoring ────────────────────────────────────────────────────
@@ -86,12 +88,12 @@ def test_scoring_is_deterministic():
 
 
 def test_all_max_scores_sum_correctly():
-    """A selection of max options for every criterion must yield 65."""
+    """A selection of max options for every criterion must yield 35."""
     from scoring_engine import SCORE_MAP, calculate_dpi_score
 
     best = {k: max(v, key=v.get) for k, v in SCORE_MAP.items()}
     result = calculate_dpi_score(best)
-    assert result["total"] == 65, f"Expected 65, got {result['total']}"
+    assert result["total"] == 35, f"Expected 35, got {result['total']}"
 
 
 def test_all_zero_scores():
@@ -102,7 +104,7 @@ def test_all_zero_scores():
     result = calculate_dpi_score(worst)
     assert (
         result["total"] == 4
-    )  # num_empleados=1, facturacion=1, alcance_actividad=1, ecommerce=1
+    )  # num_empleados=1, facturacion=1, evolucion_facturacion=1, ecommerce=1
 
 
 def test_unknown_value_scores_zero_not_raises():
