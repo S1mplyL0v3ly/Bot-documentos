@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from config import settings
+from scoring_engine import CRITERION_OPTIONS
 
 CURRENT_YEAR = datetime.now().year
 
@@ -77,56 +78,6 @@ ALCANCE_MAP: dict[str, str] = {
     "mercado canario": "Insular",
 }
 
-# Opciones válidas por criterio — usadas para validar la respuesta de Claude
-CRITERION_OPTIONS: dict[str, list[str]] = {
-    "situacion_empresa": ["No constituida", "Menos de 2 años", "Más de 2 años"],
-    "num_empleados": ["Menos de 2", "Más de 2"],
-    "facturacion": [
-        "Menos de 200.000 €",
-        "Entre 200.000 y 500.000 €",
-        "Entre 500.000 y 1.000.000 €",
-        "Más de 1.000.000 €",
-    ],
-    "evolucion_facturacion": [
-        "En decrecimiento",
-        "Se mantiene estable",
-        "En crecimiento",
-    ],
-    "recursos_internacionalizacion": ["No", "Sí"],
-    "experiencia_internacional": [
-        "Ninguna experiencia",
-        "Menos de 3 años",
-        "Más de 5 años",
-    ],
-    "alcance_actividad": ["Insular", "Nacional", "Internacional"],
-    "num_paises": ["Ninguno salvo el mercado nacional", "De 1 a 5", "Más de 5"],
-    "personal_dedicado": ["No", "Sí"],
-    "involuccion_gerencia": [
-        "Sin participación alguna",
-        "Escasamente involucrados",
-        "Medianamente involucrados",
-        "Directamente involucrados",
-    ],
-    "adaptacion_demanda": ["Baja", "Media", "Alta"],
-    "adaptacion_producto": ["Baja", "Media", "Alta"],
-    "tiene_web": ["No", "Si"],
-    "ecommerce": [
-        "Sin tienda web",
-        "Tienda web propia con ventas bajas o irregulares",
-        "Tienda web propia con ventas regulares a nivel nacional",
-        "Tienda web propia con ventas internacionales",
-    ],
-    "mercados_electronicos": [
-        "Sin presencia en mercados electrónicos",
-        "Con presencia en mercados electrónicos sin ventas o ventas bajas.",
-        "Con presencia en mercados electrónicos con ventas internacionales",
-    ],
-    "redes_sociales": [
-        "Redes sociales inactivas o con bajo uso",
-        "Redes sociales activas y planificadas",
-        "Redes sociales activas y con generación de ventas",
-    ],
-}
 
 EXTRACTOR_PROMPT = """Analiza el siguiente documento de empresa y extrae dos grupos de información.
 
