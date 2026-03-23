@@ -81,22 +81,31 @@ def generate_recommendations(selections: dict, score: dict) -> list[str]:
     return recos
 
 
-DRAFT_PROMPT = """Eres un experto en internacionalización empresarial. Basándote en el perfil DPI de la empresa, genera el análisis para el informe.
+DRAFT_PROMPT = """Eres un consultor experto en internacionalización empresarial. Genera el análisis DPI para el informe.
 
-PERFIL DE LA EMPRESA:
+EMPRESA: {empresa}
+SECTOR / PRODUCTO: {context}
+SCORING DPI: {dpi_total}/{dpi_max} pts ({dpi_pct}%) — umbral fase II: 20 pts
+  Bloque Económico:        {score_eco}/{max_eco}
+  Bloque Internacional:    {score_int}/{max_int}
+  Bloque Digitalización:   {score_dig}/{max_dig}
+
+PERFIL DE RESPUESTAS:
 {profile}
 
-CONTEXTO SECTORIAL:
-{context}
+REGLAS GENERALES:
+- Referencia SIEMPRE datos concretos de la empresa (facturación, sector, web, años)
+- Vocabulario de consultoría: "se recomienda", "se concluye", "el principal obstáculo"
+- NO repitas el nombre de los cuadrantes dentro del texto
 
 Genera ÚNICAMENTE JSON válido, sin markdown, con este formato exacto:
 {{
-  "dafo_debilidades": "texto con las debilidades detectadas (2-4 puntos)",
-  "dafo_amenazas": "texto con las amenazas del entorno (2-4 puntos)",
-  "dafo_fortalezas": "texto con las fortalezas identificadas (2-4 puntos)",
-  "dafo_oportunidades": "texto con las oportunidades internacionales (2-4 puntos)",
-  "definicion_potencial": "2-3 párrafos definiendo el potencial internacional de la empresa",
-  "conclusiones": "1-2 párrafos con conclusiones y recomendaciones"
+  "dafo_debilidades": "2-3 puntos concretos basados en las respuestas. Formato: '1. [punto]. 2. [punto].'",
+  "dafo_amenazas": "2-3 puntos sobre el entorno externo y competencia internacional.",
+  "dafo_fortalezas": "2-3 puntos específicos de la empresa (producto, sector, trayectoria).",
+  "dafo_oportunidades": "2-3 oportunidades de internacionalización concretas para este sector.",
+  "definicion_potencial": "2-3 párrafos evaluando el potencial internacional. Mencionar el score DPI exacto y qué bloque puntúa mejor/peor.",
+  "conclusiones": "Se concluye que la empresa {empresa} actualmente tiene un potencial de internacionalización {nivel}, con un valor de {dpi_total}, {umbral_txt} el corte de 20 puntos para pasar a la fase II. [Continúa con 4 subsecciones: Estrategia de Entrada, Gestión del Riesgo, Mercados Objetivo, Recomendación Final con 3 pilares concretos de acción.]"
 }}
 """
 
@@ -647,13 +656,15 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
     selections = stored["selections"]
     direct = stored["direct_fields"]
 
-    # Build human-readable profile for Claude
-    profile_lines = [f"Empresa: {direct.get('Razon_Social', 'N/D')}"]
+    empresa = direct.get("Razon_Social", "N/D")
+
+    # Build human-readable profile (exclude empresa name — already in header)
+    profile_lines = []
     for key, value in selections.items():
         profile_lines.append(f"{key}: {value or 'No especificado'}")
     profile = "\n".join(profile_lines)
 
-    # MEJORA 4: include sector and producto_servicio in DAFO context
+    # Sector + producto context
     context_parts = []
     if direct.get("sector"):
         context_parts.append(f"Sector: {direct['sector']}")
@@ -663,7 +674,33 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
         )
     context = "\n".join(context_parts) if context_parts else "No especificado"
 
-    raw = call_llm(DRAFT_PROMPT.format(profile=profile, context=context), tier=2)
+    # DPI score breakdown for prompt
+    resolved_sel = resolve_selections(selections)
+    score = calculate_dpi_score(resolved_sel)
+    s, t = score["scores"], score["totals"]
+    dpi_total = score["total"]
+    nivel = "ALTO" if dpi_total > 30 else ("MEDIO" if dpi_total >= 15 else "BAJO")
+    umbral_txt = "superando" if dpi_total >= 20 else "sin alcanzar"
+
+    raw = call_llm(
+        DRAFT_PROMPT.format(
+            empresa=empresa,
+            context=context,
+            profile=profile,
+            dpi_total=dpi_total,
+            dpi_max=score["max_total"],
+            dpi_pct=score["pct"],
+            score_eco=s.get("Económico", 0),
+            max_eco=t.get("Económico", 15),
+            score_int=s.get("Internacional", 0),
+            max_int=t.get("Internacional", 35),
+            score_dig=s.get("Digitalización", 0),
+            max_dig=t.get("Digitalización", 15),
+            nivel=nivel,
+            umbral_txt=umbral_txt,
+        ),
+        tier=2,
+    )
     draft = _parse_json(raw)
 
     if not draft:
@@ -685,10 +722,7 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
     _log_to_jarvis(True, document_id, "fase3_draft_ready")
 
     # CAMBIO 5: compact score summary instead of verbose DAFO preview
-    empresa = direct.get("Razon_Social", "Empresa")
-    selections = resolve_selections(selections)
-    score = calculate_dpi_score(selections)
-    recos = generate_recommendations(selections, score)
+    recos = generate_recommendations(resolved_sel, score)
 
     s = score["scores"]
     t = score["totals"]
