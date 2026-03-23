@@ -236,7 +236,7 @@ def _run_claude(prompt: str) -> str:
         text=True,
         encoding="utf-8",
         timeout=settings.claude_timeout,
-        cwd="/root/autoreporte",
+        cwd=str(Path(__file__).resolve().parent.parent),
     )
     return result.stdout.strip()
 
