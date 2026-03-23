@@ -10,7 +10,17 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from agents.extractor import CRITERION_OPTIONS, extract_dpi_fields, read_document_text
+from agents.extractor import extract_dpi_fields, read_document_text
+from scoring_engine import (
+    BLOCKS,
+    BLOCKS_MAX,
+    CRITERION_OPTIONS,
+    MAX_TOTAL,
+    SCORE_MAP,
+    calculate_dpi_score,
+    fuzzy_match_option,
+    resolve_selections,
+)
 from agents.web_scraper import find_best_candidate
 from config import JARVIS_DB_PATH, settings
 from database import crud
@@ -38,112 +48,6 @@ CRITERION_QUESTIONS: dict[str, str] = {
 }
 
 QUESTION_BATCH_SIZE = 7  # Max criteria per WhatsApp message
-
-# ─── DPI Scoring (CAMBIO 6) ───────────────────────────────────────────────────
-
-DPI_SCORE_MAP: dict[str, dict[str, int]] = {
-    # BLOQUE ECONÓMICO (15 pts)
-    "situacion_empresa": {
-        "No constituida": 0,
-        "Menos de 2 años": 2,
-        "Más de 2 años": 5,
-    },
-    "num_empleados": {"Menos de 2": 1, "Más de 2": 5},
-    "facturacion": {
-        "Menos de 200.000 €": 1,
-        "Entre 200.000 y 500.000 €": 2,
-        "Entre 500.000 y 1.000.000 €": 4,
-        "Más de 1.000.000 €": 5,
-    },
-    # BLOQUE INTERNACIONAL (35 pts)
-    "experiencia_internacional": {
-        "Ninguna experiencia": 0,
-        "Menos de 3 años": 4,
-        "Más de 5 años": 10,
-    },
-    "alcance_actividad": {"Insular": 1, "Nacional": 3, "Internacional": 6},
-    "evolucion_facturacion": {
-        "En decrecimiento": 0,
-        "Se mantiene estable": 3,
-        "En crecimiento": 6,
-    },
-    "involuccion_gerencia": {
-        "Sin participación alguna": 0,
-        "Escasamente involucrados": 1,
-        "Medianamente involucrados": 3,
-        "Directamente involucrados": 5,
-    },
-    "adaptacion_demanda": {"Baja": 0, "Media": 2, "Alta": 4},
-    "adaptacion_producto": {"Baja": 0, "Media": 1, "Alta": 2},
-    "num_paises": {
-        "Ninguno salvo el mercado nacional": 0,
-        "De 1 a 5": 1,
-        "Más de 5": 2,
-    },
-    # BLOQUE DIGITALIZACIÓN (15 pts)
-    "tiene_web": {"No": 0, "Si": 3},
-    "ecommerce": {
-        "Sin tienda web": 1,
-        "Tienda web propia con ventas bajas o irregulares": 2,
-        "Tienda web propia con ventas regulares a nivel nacional": 4,
-        "Tienda web propia con ventas internacionales": 6,
-    },
-    "mercados_electronicos": {
-        "Sin presencia en mercados electrónicos": 0,
-        "Con presencia en mercados electrónicos sin ventas o ventas bajas.": 1,
-        "Con presencia en mercados electrónicos con ventas internacionales": 4,
-    },
-    "redes_sociales": {
-        "Redes sociales inactivas o con bajo uso": 0,
-        "Redes sociales activas y planificadas": 1,
-        "Redes sociales activas y con generación de ventas": 2,
-    },
-}
-
-BLOQUES: dict[str, list[str]] = {
-    "Económico": ["situacion_empresa", "num_empleados", "facturacion"],
-    "Internacional": [
-        "experiencia_internacional",
-        "alcance_actividad",
-        "evolucion_facturacion",
-        "involuccion_gerencia",
-        "adaptacion_demanda",
-        "adaptacion_producto",
-        "num_paises",
-    ],
-    "Digitalización": [
-        "tiene_web",
-        "ecommerce",
-        "mercados_electronicos",
-        "redes_sociales",
-    ],
-}
-
-BLOQUES_MAX: dict[str, int] = {
-    "Económico": 15,
-    "Internacional": 35,
-    "Digitalización": 15,
-}
-
-
-def calculate_dpi_score(selections: dict) -> dict:
-    """Calcula puntuación DPI por bloque y total. Devuelve scores y porcentajes."""
-    scores: dict[str, int] = {}
-    for bloque, criteria in BLOQUES.items():
-        pts = 0
-        for criterion in criteria:
-            val = selections.get(criterion)
-            if val:
-                pts += DPI_SCORE_MAP.get(criterion, {}).get(val, 0)
-        scores[bloque] = pts
-    total = sum(scores.values())
-    return {
-        "scores": scores,
-        "totals": BLOQUES_MAX,
-        "total": total,
-        "max_total": 65,
-        "pct": round(total / 65 * 100),
-    }
 
 
 def generate_recommendations(selections: dict, score: dict) -> list[str]:
@@ -795,6 +699,7 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
 
     # CAMBIO 5: compact score summary instead of verbose DAFO preview
     empresa = direct.get("Razon_Social", "Empresa")
+    selections = resolve_selections(selections)
     score = calculate_dpi_score(selections)
     recos = generate_recommendations(selections, score)
 
