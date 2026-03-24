@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from config import BASE_DIR, TEMPLATES_DIR
@@ -255,8 +257,78 @@ def _apply_direct_fields_to_paragraphs(
         _replace_in_paragraph(paragraph, direct_fields)
 
 
+def _write_conclusions(doc: Document, conclusion_text: str) -> bool:
+    """Find [Redactar] paragraph and replace with formatted conclusion subsections.
+
+    The intro sentence goes into the existing paragraph. Each subsequent
+    subsection (separated by double newline) is inserted as a new paragraph
+    with the title portion bold ('Titulo. body text').
+
+    Returns True if the marker was found and processed.
+    """
+    marker = "[Redactar]"
+    target_para = None
+    for para in doc.paragraphs:
+        if marker in para.text:
+            target_para = para
+            break
+    if target_para is None:
+        return False
+
+    sections = [s.strip() for s in re.split(r"\n\n+", conclusion_text) if s.strip()]
+    if not sections:
+        target_para.clear()
+        target_para.add_run(conclusion_text)
+        return True
+
+    # Replace existing paragraph with intro
+    target_para.clear()
+    target_para.add_run(sections[0])
+
+    # Insert remaining sections as new paragraphs after intro
+    last_elem = target_para._p
+    for section in sections[1:]:
+        if not section.strip():
+            continue
+        new_p = OxmlElement("w:p")
+        last_elem.addnext(new_p)
+        last_elem = new_p
+
+        parts = section.split(". ", 1)
+        title_text = parts[0] + ". " if len(parts) == 2 else section
+
+        r_title = OxmlElement("w:r")
+        rPr = OxmlElement("w:rPr")
+        rPr.append(OxmlElement("w:b"))
+        r_title.append(rPr)
+        t_title = OxmlElement("w:t")
+        t_title.set(qn("xml:space"), "preserve")
+        t_title.text = title_text
+        r_title.append(t_title)
+        new_p.append(r_title)
+
+        if len(parts) == 2:
+            r_body = OxmlElement("w:r")
+            t_body = OxmlElement("w:t")
+            t_body.set(qn("xml:space"), "preserve")
+            t_body.text = parts[1]
+            r_body.append(t_body)
+            new_p.append(r_body)
+
+    return True
+
+
 def _apply_free_texts_to_paragraphs(doc: Document, free_texts: dict[str, str]) -> None:
-    """Replace [Poner texto]/[Redactar] markers and {{dafo_*}} fallback placeholders."""
+    """Replace [Poner texto]/[Redactar] markers and {{dafo_*}} fallback placeholders.
+
+    [Redactar] (conclusions) is handled by _write_conclusions() first so that
+    subsections get proper bold formatting. The regular loop skips it since the
+    marker is gone by then.
+    """
+    conclusion_text = free_texts.get("conclusiones", "")
+    if conclusion_text:
+        _write_conclusions(doc, conclusion_text)
+
     dafo_replacements = {k: free_texts.get(k, "") for k in DAFO_KEYS}
     for paragraph in _iter_all_paragraphs(doc):
         _replace_marker_in_paragraph(paragraph, free_texts)  # BUG 4 fix
@@ -430,6 +502,12 @@ def render_template(
     }
 
     _clean_corrupted_headings(doc)  # reset headings with leaked text
+
+    # Force LEFT alignment on all headings (template may have JUSTIFY)
+    for para in doc.paragraphs:
+        if para.style.name.startswith("Heading"):
+            para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
     _apply_direct_fields_to_paragraphs(doc, direct_fields)
     _apply_dpi_options(doc, selections)  # write numeric scores for option rows
     _write_score_values(doc, selections)  # write selected score in golden cells

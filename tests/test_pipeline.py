@@ -801,7 +801,7 @@ def test_search_cif_ddg_extracts_from_snippet():
 
         fake_mod = MagicMock()
         fake_mod.DDGS = FakeDDGS
-        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+        with patch.dict(sys.modules, {"ddgs": fake_mod}):
             result = search_cif_ddg("Atelier Maria Secretos")
 
     assert result == "B76543210"
@@ -833,7 +833,7 @@ def test_search_cif_ddg_returns_none_when_not_found():
 
     fake_mod = MagicMock()
     fake_mod.DDGS = FakeDDGS
-    with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+    with patch.dict(sys.modules, {"ddgs": fake_mod}):
         result = search_cif_ddg("Empresa Inexistente SL")
 
     assert result is None
@@ -847,7 +847,7 @@ def test_search_cif_ddg_returns_none_on_exception():
 
     fake_mod = MagicMock()
     fake_mod.DDGS.side_effect = RuntimeError("network error")
-    with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+    with patch.dict(sys.modules, {"ddgs": fake_mod}):
         result = search_cif_ddg("Any Company")
 
     assert result is None
