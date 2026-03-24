@@ -20,7 +20,7 @@ from scoring_engine import (
     fuzzy_match_option,
     resolve_selections,
 )
-from agents.web_scraper import find_best_candidate
+from agents.web_scraper import enrich_conclusions_context, find_best_candidate
 from config import JARVIS_DB_PATH, settings
 from utils.dq_adapter import call_llm
 from database import crud
@@ -93,10 +93,14 @@ SCORING DPI: {dpi_total}/{dpi_max} pts ({dpi_pct}%) — umbral fase II: 20 pts
 PERFIL DE RESPUESTAS:
 {profile}
 
+CONTEXTO DEL SECTOR (datos reales de web, úsalos si son relevantes):
+{sector_context}
+
 REGLAS GENERALES:
 - Referencia SIEMPRE datos concretos de la empresa (facturación, sector, web, años)
 - Vocabulario de consultoría: "se recomienda", "se concluye", "el principal obstáculo"
 - NO repitas el nombre de los cuadrantes dentro del texto
+- Si el contexto del sector incluye datos reales, cítalos para hacer las recomendaciones específicas
 
 Genera ÚNICAMENTE JSON válido, sin markdown, con este formato exacto:
 {{
@@ -696,11 +700,16 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
     nivel = "ALTO" if dpi_total > 30 else ("MEDIO" if dpi_total >= 15 else "BAJO")
     umbral_txt = "superando" if dpi_total >= 20 else "sin alcanzar"
 
+    # Sector web research for richer conclusions (~5s, $0)
+    sector_raw = direct.get("sector", "")
+    sector_context = enrich_conclusions_context(sector_raw, empresa)
+
     raw = call_llm(
         DRAFT_PROMPT.format(
             empresa=empresa,
             context=context,
             profile=profile,
+            sector_context=sector_context or "Sin contexto adicional disponible.",
             dpi_total=dpi_total,
             dpi_max=score["max_total"],
             dpi_pct=score["pct"],

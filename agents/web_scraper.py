@@ -302,7 +302,51 @@ def search_cif_infocif(company_name: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# 6. Main entry point
+# 6. Sector context enrichment for conclusions
+# ---------------------------------------------------------------------------
+
+
+def enrich_conclusions_context(sector: str, company_name: str = "") -> str:
+    """Quick DDG search for sector internationalisation context (~5s, $0 cost).
+
+    Returns up to 1000 chars of real-world context to inject into the
+    conclusion prompt. Returns empty string on any failure.
+    """
+    if not sector or sector == "No especificado":
+        return ""
+    try:
+        from ddgs import DDGS  # type: ignore
+
+        query = f"{sector} internacionalización pymes España 2025"
+        urls: list[str] = []
+        with DDGS() as ddgs:
+            for result in ddgs.text(query, max_results=3):
+                href = result.get("href", "")
+                if href:
+                    urls.append(href)
+
+        context_parts: list[str] = []
+        headers = {"User-Agent": "Mozilla/5.0"}
+        for url in urls[:2]:
+            try:
+                resp = httpx.get(url, timeout=8, follow_redirects=True, headers=headers)
+                soup = BeautifulSoup(resp.text, "html.parser")
+                text = soup.get_text(separator=" ", strip=True)
+                # Keep the first 500 chars that contain useful content
+                snippet = text[:600].strip()
+                if snippet:
+                    context_parts.append(snippet)
+            except Exception:
+                continue
+
+        combined = "\n".join(context_parts)
+        return combined[:1000]
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# 7. Main entry point
 # ---------------------------------------------------------------------------
 
 
