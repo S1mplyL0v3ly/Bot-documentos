@@ -1,6 +1,6 @@
 """CRUD operations for autoreporte database."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -133,14 +133,14 @@ def create_or_update_generated_docx(
         record = GeneratedDocx(
             document_id=document_id,
             output_path=output_path,
-            generated_at=datetime.utcnow(),
+            generated_at=datetime.now(timezone.utc),
             fields_complete=fields_complete,
         )
         record.missing_fields = missing_fields
         db.add(record)
     else:
         record.output_path = output_path
-        record.generated_at = datetime.utcnow()
+        record.generated_at = datetime.now(timezone.utc)
         record.fields_complete = fields_complete
         record.missing_fields = missing_fields
     db.commit()
