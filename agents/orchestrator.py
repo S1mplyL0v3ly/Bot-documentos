@@ -125,7 +125,9 @@ def clean_ai_markers(text: str) -> str:
     text = text.replace(" –", ",").replace("– ", ", ").replace("–", ", ")
     # Strip markdown bold markers
     text = text.replace("**", "")
-    return text
+    # Strip inline list numbering: "1. texto 2. texto" → "texto texto"
+    text = re.sub(r"\b\d{1,2}\.\s+", "", text)
+    return text.strip()
 
 
 def _log_to_jarvis(success: bool, document_id: int, notes: str = "") -> None:
