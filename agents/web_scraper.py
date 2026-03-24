@@ -81,7 +81,7 @@ def _tokenize(text: str) -> set[str]:
 def _ddgs_search_one(query: str, max_results: int) -> list[str]:
     """Run one DDGS text search synchronously — called via asyncio.to_thread."""
     try:
-        from duckduckgo_search import DDGS  # type: ignore
+        from ddgs import DDGS  # type: ignore
 
         with DDGS() as ddgs:
             return [
@@ -259,7 +259,7 @@ def search_cif_ddg(company_name: str) -> Optional[str]:
     Never loads Einforma/Axesor pages — the CIF appears in result snippets.
     """
     try:
-        from duckduckgo_search import DDGS  # type: ignore
+        from ddgs import DDGS  # type: ignore
 
         query = f'"{company_name}" CIF'
         with DDGS() as ddgs:
