@@ -253,23 +253,49 @@ def _build_dpi_from_web(url: str, html: str) -> dict:
 
 
 def search_cif_ddg(company_name: str) -> Optional[str]:
-    """Search DuckDuckGo for '"{company_name}" CIF' and extract CIF from snippets.
+    """Search DuckDuckGo with 3 queries and extract CIF from snippets.
 
     Returns the CIF string (e.g. 'B12345678') or None if not found.
-    Never loads Einforma/Axesor pages — the CIF appears in result snippets.
+    Tries snippets only — no page loads to avoid anti-bot blocks.
     """
+    queries = [
+        f'"{company_name}" CIF',
+        f'"{company_name}" NIF empresa',
+        f'"{company_name}" registro mercantil',
+    ]
     try:
         from ddgs import DDGS  # type: ignore
 
-        query = f'"{company_name}" CIF'
         with DDGS() as ddgs:
-            for result in ddgs.text(query, max_results=8):
-                # Check both snippet body and title
-                for field in ("body", "title", "href"):
-                    text = result.get(field, "") or ""
-                    match = _CIF_PATTERN.search(text)
-                    if match:
-                        return match.group(1).upper()
+            for query in queries:
+                for result in ddgs.text(query, max_results=5):
+                    for field in ("body", "title", "href"):
+                        text = result.get(field, "") or ""
+                        match = _CIF_PATTERN.search(text)
+                        if match:
+                            return match.group(1).upper()
+    except Exception:
+        pass
+    return None
+
+
+def search_cif_infocif(company_name: str) -> Optional[str]:
+    """Search infocif.es for CIF by company name (specialised registry source).
+
+    Returns the CIF string or None if not found / blocked.
+    """
+    try:
+        query = company_name.replace(" ", "+")
+        url = f"https://www.infocif.es/buscar-empresas?q={query}"
+        resp = httpx.get(
+            url,
+            timeout=10,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        match = _CIF_PATTERN.search(resp.text)
+        if match:
+            return match.group(1).upper()
     except Exception:
         pass
     return None
@@ -325,9 +351,11 @@ async def find_best_candidate(
     if best_url and best_score >= _MIN_SCORE and best_html:
         dpi_signals = _build_dpi_from_web(best_url, best_html)
 
-    # CIF fallback (still sync — run in thread to avoid blocking event loop)
+    # CIF fallback: DDG snippets first, then infocif.es
     if not dpi_signals.get("direct_fields", {}).get("CIF"):
         cif = await asyncio.to_thread(search_cif_ddg, company_name)
+        if not cif:
+            cif = await asyncio.to_thread(search_cif_infocif, company_name)
         if cif:
             dpi_signals.setdefault("direct_fields", {})["CIF"] = cif
             dpi_signals.setdefault("confidence", {})["CIF"] = 0.7
