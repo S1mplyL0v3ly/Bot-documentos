@@ -116,6 +116,18 @@ PREFIX_SELECTION = "sel_"
 PREFIX_TEXT = "txt_"
 
 
+def clean_ai_markers(text: str) -> str:
+    """Remove obvious AI-generated markers from text."""
+    if not text:
+        return text
+    # Em-dash and en-dash → comma
+    text = text.replace(" —", ",").replace("— ", ", ").replace("—", ", ")
+    text = text.replace(" –", ",").replace("– ", ", ").replace("–", ", ")
+    # Strip markdown bold markers
+    text = text.replace("**", "")
+    return text
+
+
 def _log_to_jarvis(success: bool, document_id: int, notes: str = "") -> None:
     """Write pipeline result to JARVIS agent_actions table."""
     if not JARVIS_DB_PATH.exists():
@@ -707,7 +719,10 @@ async def generate_draft_texts(db: Session, document_id: int) -> dict:
         crud.update_document_status(db, document_id, "error")
         return {"status": "error", "reason": "Claude no pudo generar el borrador."}
 
-    # Persist free texts
+    # Persist free texts (clean AI markers before storing)
+    for key, value in draft.items():
+        if isinstance(value, str):
+            draft[key] = clean_ai_markers(value)
     for key, value in draft.items():
         crud.upsert_field(
             db,
