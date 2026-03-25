@@ -1,6 +1,7 @@
 """FastAPI route definitions."""
 
 import asyncio
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -85,10 +86,31 @@ def get_db():
         db.close()
 
 
+_SAFE_UPLOAD_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".txt",
+    ".md",
+    ".csv",
+    ".xlsx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+}
+
+
 def _save_upload(upload: UploadFile) -> Path:
-    """Persist uploaded file to disk and return its path."""
-    safe_name = Path(upload.filename or "document").name
+    """Persist uploaded file to disk with a randomized name to prevent traversal."""
+    original = Path(upload.filename or "document")
+    extension = original.suffix.lower()
+    if extension not in _SAFE_UPLOAD_EXTENSIONS:
+        raise HTTPException(400, f"File type {extension!r} not allowed")
+    # Use UUID-based name to prevent path traversal and filename collisions
+    safe_name = f"{uuid.uuid4().hex[:16]}{extension}"
     dest = UPLOAD_DIR / safe_name
+    # Verify dest stays within UPLOAD_DIR (symlink escape guard)
+    if not dest.resolve().is_relative_to(UPLOAD_DIR.resolve()):
+        raise HTTPException(400, "Invalid file path")
     dest.write_bytes(upload.file.read())
     return dest
 
