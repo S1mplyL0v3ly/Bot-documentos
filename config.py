@@ -23,8 +23,13 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{DATABASE_DIR}/autoreporte.db"
 
     # API
-    host: str = "0.0.0.0"
+    host: str = (
+        "127.0.0.1"  # hardened: localhost only; use reverse proxy for external access
+    )
     port: int = 8001
+    api_key: str = (
+        ""  # AUTOREPORT_API_KEY in .env — empty means service will refuse to start
+    )
 
     # Claude headless
     claude_model: str = "claude-sonnet-4-6"
