@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     claude_model: str = "claude-sonnet-4-6"
     claude_timeout: int = 120
 
+    # Tunnel URL (updated automatically by update_tunnel_url.sh on cloudflared restart)
+    webhook_url: str = ""
+
     # WhatsApp (placeholder — completar en .env)
     whatsapp_token: str = ""
     whatsapp_phone_id: str = ""
