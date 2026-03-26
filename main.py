@@ -12,14 +12,14 @@ from database.init_db import init_db
 
 async def verify_api_key(x_api_key: str = Header(...)) -> None:
     """Dependency: require X-Api-Key header matching AUTOREPORT_API_KEY."""
-    if not settings.api_key or x_api_key != settings.api_key:
+    if not settings.autoreport_api_key or x_api_key != settings.autoreport_api_key:
         raise HTTPException(status_code=403, detail="Invalid or missing API key.")
 
 
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
     # Fail-closed: refuse to start without an API key configured
-    if not settings.api_key:
+    if not settings.autoreport_api_key:
         print(
             "[autoreporte] FATAL: AUTOREPORT_API_KEY is not set. "
             "Set it in .env before starting the service.",

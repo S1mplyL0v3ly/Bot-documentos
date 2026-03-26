@@ -27,7 +27,7 @@ class Settings(BaseSettings):
         "127.0.0.1"  # hardened: localhost only; use reverse proxy for external access
     )
     port: int = 8001
-    api_key: str = (
+    autoreport_api_key: str = (
         ""  # AUTOREPORT_API_KEY in .env — empty means service will refuse to start
     )
 
